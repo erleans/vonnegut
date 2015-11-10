@@ -1,0 +1,28 @@
+{application, vonnegut,
+ [{description, "An OTP application"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {vonnegut_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    ranch,
+    gproc
+   ]},
+  {env,[{log_dirs, ["./data"]},
+        {port, 5555},
+
+        {send_buffer_bytes, 102400},
+
+        %% Log and index file related configs
+        {segment_bytes, 1073741824},
+        {index_max_bytes, 10485760},
+        {index_interval_bytes, 4096},
+
+        {num_partitions, 1}]},
+  {modules, []},
+
+  {contributors, []},
+  {licenses, []},
+  {links, []}
+ ]}.
