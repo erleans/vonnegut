@@ -3,50 +3,67 @@
 %% Position is the offset in [offset].log to find the log Id
 -module(vg_index).
 
--export([find_in_index/2,
-         read_index/1]).
+-export([find_in_index/2]).
 
-%% Parse index into searchable format
-read_index(TopicDirBinary) ->
-    TopicDir = binary_to_list(TopicDirBinary),
+-spec find_in_index(Topic, Id) -> integer() | not_found when
+      Topic :: binary(),
+      Id    :: integer().
+find_in_index(Topic, Id) ->
+    find_in_index(Topic, <<"0">>, Id).
+
+-spec find_in_index(Topic, Partition, Id) -> integer() | not_found when
+      Topic     :: binary(),
+      Partition :: binary(),
+      Id        :: integer().
+find_in_index(Topic, Partition, Id) ->
+    {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
+    TopicDir = filename:join(ec_cnv:to_list(LogDir), [ec_cnv:to_list(Topic), "-", ec_cnv:to_list(Partition)]),
     IndexFiles = lists:sort(filelib:wildcard(filename:join(TopicDir, "*.index"))),
-    lists:map(fun(File) ->
-                      Offset = list_to_integer(filename:basename(File, ".index")),
-                      {ok, Binary} = file:read_file(File),
-                      {Offset, lists:reverse(index_to_list(Binary))}
-              end, IndexFiles).
+    case find_in_index_(Id, IndexFiles) of
+        {Offset, Position} ->
+            {vg_utils:log_file(TopicDir, Offset), Position};
+        not_found ->
+            not_found
+    end.
 
-index_to_list(Binary) ->
-    index_to_list(Binary, []).
+find_in_index_(Id, Files) ->
+    case find_index_file(Id, Files) of
+        {Offset, File} ->
+            {ok, Binary} = file:read_file(File),
+            {Offset, find_in_index_file(Id, Offset, Binary)};
+        _ ->
+            not_found
+    end.
 
-index_to_list(<<>>, Acc) ->
-    Acc;
-index_to_list(<<Id:24/signed, Position:24/signed>>, Acc) ->
-    [{Id, Position} | Acc];
-index_to_list(<<Id:24/signed, Position:24/signed, Rest/binary>>, Acc) ->
-    index_to_list(Rest, [{Id, Position} | Acc]).
+find_index_file(_, []) ->
+    not_found;
+find_index_file(Id, [X]) ->
+    case list_to_integer(filename:basename(X, ".index")) of
+        XOffset when XOffset =< Id ->
+            {XOffset, X};
+        _ ->
+            not_found
+    end;
+find_index_file(Id, [X, Y | T]) ->
+    XOffset = list_to_integer(filename:basename(X, ".index")),
+    case list_to_integer(filename:basename(Y, ".index")) of
+        YOffset when YOffset > Id ->
+            {XOffset, X};
+        YOffset when YOffset =:= Id ->
+            {YOffset, Y};
+        _ ->
+            find_index_file(Id, T)
+    end.
 
-%% Find the logical position in the log file from the index
-find_in_index(_Id, []) ->
-    {0, 0};
-find_in_index(Id, [{Offset, Segments}]) ->
-    {Offset, find_pos_in_index(Id, Offset, Segments)};
-find_in_index(Id, [{_, _}, {Offset, Segments} | _]) when Offset =:= Id ->
-    {Offset, find_pos_in_index(Id, Offset, Segments)};
-find_in_index(Id, [{Offset, Segments}, {NextOffset, _} | _]) when NextOffset > Id ->
-    {Offset, find_pos_in_index(Id, Offset, Segments)};
-find_in_index(Id, [{_, _} | Rest]) ->
-    find_in_index(Id, Rest).
-
-find_pos_in_index(_Id, _, []) ->
+find_in_index_file(_, _, <<>>) ->
     0;
-find_pos_in_index(Id, Offset, [{X, _}]) when Offset + X > Id ->
-    0;
-find_pos_in_index(_Id, _, [{_, Position}]) ->
+find_in_index_file(_, _, <<_:24/signed, Position:24/signed>>) ->
     Position;
-find_pos_in_index(Id, Offset, [{_, _}, {Y, Position} | _]) when Offset + Y =:= Id ->
+find_in_index_file(Id, BaseOffset, <<Offset:24/signed, Position:24/signed, _/binary>>)
+  when Id =:= BaseOffset + Offset ->
     Position;
-find_pos_in_index(Id, Offset, [{_, Position}, {Y, _} | _]) when Offset + Y > Id ->
+find_in_index_file(Id, BaseOffset, <<_:24/signed, Position:24/signed, Offset:24/signed, _:24/signed, _/binary>>)
+  when BaseOffset + Offset > Id ->
     Position;
-find_pos_in_index(Id, Offset, [{_, _}, {_, _} | Rest]) ->
-    find_pos_in_index(Id, Offset, Rest).
+find_in_index_file(Id, BaseOffset, <<_:24/signed, _:24/signed, Rest/binary>>) ->
+    find_in_index_file(Id, BaseOffset, Rest).

@@ -3,7 +3,7 @@
 
 -export([start_link/2,
          write/3,
-         read/3]).
+         find_in_log/3]).
 
 -export([init/1,
          handle_call/3,
@@ -13,11 +13,13 @@
          code_change/3]).
 
 
--record(config, {segment_bytes        :: integer(),
+-record(config, {log_dir              :: file:filename(),
+                 segment_bytes        :: integer(),
                  index_max_bytes      :: integer(),
                  index_interval_bytes :: integer()}).
 
 -record(state, {topic_dir   :: file:filename(),
+                id          :: integer(),
                 byte_count  :: integer(),
                 pos         :: integer(),
                 index_pos   :: integer(),
@@ -25,8 +27,6 @@
                 base_offset :: integer(),
                 segment_id  :: integer(),
                 index_fd    :: file:fd(),
-                index       :: [{binary(), binary()}],
-                id          :: integer(),
 
                 config      :: #config{}
                }).
@@ -41,12 +41,10 @@ start_link(Topic, Partition) ->
 write(Topic, Partition, Message) ->
     gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, {write, Message}).
 
-read(Topic, Partition, Id) ->
-    gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, {read, Id}).
-
 init([Topic, Partition]) ->
     Config = setup_config(),
 
+    LogDir = Config#config.log_dir,
     TopicDir = filename:join(LogDir, <<Topic/binary, "-", Partition/binary>>),
     filelib:ensure_dir(filename:join(TopicDir, "ensure")),
 
@@ -55,13 +53,11 @@ init([Topic, Partition]) ->
     {ok, LogFD} = file:open(LatestLog, [append, raw]),
     {ok, IndexFD} = file:open(LatestIndex, [append, raw]),
 
-    Index = vg_index:read_index(TopicDir),
-    io:format("Index ~p~n", [Index]),
-
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
-    {ok, #state{topic_dir=TopicDir,
+    {ok, #state{id=Id,
+                topic_dir=TopicDir,
                 byte_count=0,
                 pos=Position,
                 index_pos=IndexPosition,
@@ -69,19 +65,10 @@ init([Topic, Partition]) ->
                 segment_id=0,
                 base_offset=list_to_integer(LastLogId),
                 index_fd=IndexFD,
-                index=Index,
-                id=Id,
 
                 config=Config
                }}.
 
-handle_call({read, Id}, _From, State=#state{index=Index,
-                                            topic_dir=TopicDir}) ->
-    {FileId, Position} = vg_index:find_in_index(Id, Index),
-    Filename = log_file(binary_to_list(TopicDir), FileId),
-    {ok, Fd} = file:open(Filename, [read, binary, raw]),
-    Position1 = find_in_log(Fd, Id, Position, file:pread(Fd, Position, 16)),
-    {reply, {Filename, Position1}, State};
 handle_call({write, Message}, _From, State) ->
     State1 = write_message(Message, State),
     {reply, ok, State1}.
@@ -102,31 +89,32 @@ code_change(_, State, _) ->
 
 write_message(Message, State=#state{id=Id,
                                     pos=Position,
+                                    index_pos=IndexPosition,
                                     byte_count=ByteCount}) ->
     Bytes = vg_encode:log(Id, Message),
     Size = erlang:iolist_size(Bytes),
-    NewByteCount = ByteCount + Size,
-
-    State1 = maybe_roll(State#state{byte_count=NewByteCount,
-                                    pos=Position+Size}),
+    State1 = maybe_roll(Size, State),
     update_log(Bytes, State1),
     update_index(State1),
-    State1#state{id=Id+1}.
+    State1#state{id=Id+1,
+                 pos=Position+Size,
+                 index_pos=IndexPosition+16,
+                 byte_count=ByteCount+Size}.
 
 %% Create new log segment and index file if current segment is too large
 %% or if the index file is over its max and would be written to again.
-maybe_roll(State=#state{id=Id,
-                             topic_dir=TopicDir,
-                             log_fd=LogFile,
-                             index_fd=IndexFile,
-                             pos=Position,
-                             byte_count=ByteCount,
-                             index_pos=IndexPosition,
-                             config=#config{segment_bytes=SegmentBytes,
-                                            index_max_bytes=IndexMaxBytes,
-                                            index_interval_bytes=IndexIntervalBytes}})
-  when Position > SegmentBytes
-     ; ByteCount >= IndexIntervalBytes
+maybe_roll(Size, State=#state{id=Id,
+                              topic_dir=TopicDir,
+                              log_fd=LogFile,
+                              index_fd=IndexFile,
+                              pos=Position,
+                              byte_count=ByteCount,
+                              index_pos=IndexPosition,
+                              config=#config{segment_bytes=SegmentBytes,
+                                             index_max_bytes=IndexMaxBytes,
+                                             index_interval_bytes=IndexIntervalBytes}})
+  when Position+Size > SegmentBytes
+     ; ByteCount+Size >= IndexIntervalBytes
        , IndexPosition+6 > IndexMaxBytes ->
     ok = file:close(LogFile),
     ok = file:close(IndexFile),
@@ -138,7 +126,7 @@ maybe_roll(State=#state{id=Id,
                 byte_count=0,
                 pos=0,
                 index_pos=0};
-maybe_roll(State) ->
+maybe_roll(_, State) ->
     State.
 
 %% Append encoded log to segment
@@ -147,9 +135,9 @@ update_log(Message, #state{log_fd=LogFile}) ->
 
 %% Add to index if the number of bytes written to the log since the last index record was written
 update_index(State=#state{id=Id,
+                          pos=Position,
                           index_fd=IndexFile,
                           byte_count=ByteCount,
-                          pos=Position,
                           index_pos=IndexPosition,
                           base_offset=BaseOffset,
                           config=#config{index_interval_bytes=IndexIntervalBytes}})
@@ -162,8 +150,8 @@ update_index(State) ->
 
 %% Rolling log and index files, so open new empty ones for appending
 new_index_log_files(TopicDir, Id) ->
-    IndexFilename = index_file(TopicDir, Id),
-    LogFilename = log_file(TopicDir, Id),
+    IndexFilename = vg_utils:index_file(TopicDir, Id),
+    LogFilename = vg_utils:log_file(TopicDir, Id),
 
     %% Make sure empty?
     {ok, IndexFile} = file:open(IndexFilename, [append, raw]),
@@ -176,35 +164,28 @@ find_latest_id(TopicDirBinary) ->
     TopicDir = binary_to_list(TopicDirBinary),
     case lists:reverse(lists:sort(filelib:wildcard(filename:join(TopicDir, "*.log")))) of
         [] ->
-            LatestIndex = index_file(TopicDir, 0),
-            LatestLog = log_file(TopicDir, 0),
+            LatestIndex = vg_utils:index_file(TopicDir, 0),
+            LatestLog = vg_utils:log_file(TopicDir, 0),
             {0, LatestIndex, LatestLog};
         [LatestLog | _] ->
             {ok, Index} = case lists:reverse(lists:sort(filelib:wildcard(filename:join(TopicDir, "*.index")))) of
                               [] ->
-                                  LatestIndex = index_file(TopicDir, 0),
+                                  LatestIndex = vg_utils:index_file(TopicDir, 0),
                                   {ok, <<>>};
                               [LatestIndex | _] ->
                                   file:read_file(LatestIndex)
                           end,
             BaseOffset = list_to_integer(filename:basename(LatestIndex, ".index")),
-            {Offset, _Position} = latest_in_index(Index),
-            {ok, Log} = file:open(LatestLog, [read, raw, binary, {read_ahead, Offset}]),
+            {Offset, Position} = latest_in_index(Index),
+            {ok, Log} = file:open(LatestLog, [read, raw, binary]),
             try
-                {ok, Data} = file:read(Log, 16),
-                NewId = find_last_log(Log, Offset+BaseOffset, Data),
-                {NewId, LatestIndex, LatestLog}
+                NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
+                file:close(Log),
+                {NewId+BaseOffset, LatestIndex, LatestLog}
             after
                 file:close(Log)
             end
     end.
-
-%% Convenience functions for creating index and log file names
-index_file(TopicDir, Id) ->
-    filename:join(TopicDir, io_lib:format("~20.10.0b.index", [Id])).
-
-log_file(TopicDir, Id) ->
-    filename:join(TopicDir, io_lib:format("~20.10.0b.log", [Id])).
 
 %% Find the last Id (Offset - BaseOffset) and file position in the index
 latest_in_index(<<>>) ->
@@ -227,13 +208,21 @@ find_last_log(_Log, Id, _) ->
     Id.
 
 %% Find the position in Log file of the start of a log with id Id
-find_in_log(_Log, Id, Position, {ok, <<Id:64/signed, _MessageSize:32/signed, _CRC:32/signed>>}) ->
+-spec find_in_log(Log, Id, Position) -> integer() when
+      Log :: file:fd(),
+      Id :: integer(),
+      Position :: integer().
+find_in_log(Log, Id, Position) ->
+    {ok, _} = file:position(Log, Position),
+    find_in_log(Log, Id, Position, file:read(Log, 16)).
+
+find_in_log(_Log, Id, Position, {ok, <<Id:64/signed, _Size:32/signed, _CRC:32/signed>>}) ->
     Position;
 find_in_log(Log, Id, Position, {ok, <<_NewId:64/signed, Size:32/signed, _CRC:32/signed>>}) ->
     MessageSize = Size - 4,
     case file:read(Log, MessageSize + 16) of
-        {ok, <<_:MessageSize/binary, Data:16/binary>>} ->
-            find_in_log(Log, Id, Position+MessageSize, {ok, Data});
+        {ok, <<M:MessageSize/binary, Data:16/binary>>} ->
+            find_in_log(Log, Id, Position+MessageSize+16, {ok, Data});
         _ ->
             error
     end;
@@ -245,6 +234,7 @@ setup_config() ->
     {ok, SegmentBytes} = application:get_env(vonnegut, segment_bytes),
     {ok, IndexMaxBytes} = application:get_env(vonnegut, index_max_bytes),
     {ok, IndexIntervalBytes} = application:get_env(vonnegut, index_interval_bytes),
-    #config{segment_bytes=SegmentBytes,
+    #config{log_dir=LogDir,
+            segment_bytes=SegmentBytes,
             index_max_bytes=IndexMaxBytes,
             index_interval_bytes=IndexIntervalBytes}.

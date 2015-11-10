@@ -15,17 +15,14 @@ init(Ref, Socket, Transport, _Opts = []) ->
 loop(Socket, Transport) ->
     case Transport:recv(Socket, 0, 5000) of
         {ok, Data} ->
-            io:format("Data ~p~n", [Data]),
             [Num, _] = binary:split(Data, <<"\r\n">>),
             Id = binary_to_integer(Num),
-            {Filename, Position} = vg_log:read(<<"test">>, <<"0">>, Id),
-            io:format("Data ~p~n", [Position]),
-
+            {Filename, Position} = vg_index:find_in_index(<<"test">>, Id),
             {ok, Fd} = file:open(Filename, [read, binary, raw]),
-
-            send_chunks(Fd, Socket, Position),
-
-            loop(Socket, Transport);
+            Position1 = vg_log:find_in_log(Fd, Id, Position),
+            send_chunks(Fd, Socket, Position1),
+            loop(Socket, Transport),
+            file:close(Fd);
         _ ->
             ok = Transport:close(Socket)
     end.
