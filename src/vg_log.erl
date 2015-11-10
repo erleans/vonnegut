@@ -33,12 +33,12 @@
 start_link(Topic, Partition) ->
     gen_server:start_link({via, gproc, {n,l,{?MODULE,Topic,Partition}}}, ?MODULE, [Topic, Partition], []).
 
--spec write(Topic, Partition, Message) -> ok when
+-spec write(Topic, Partition, MessageSet) -> ok when
       Topic :: binary(),
       Partition :: integer(),
-      Message :: binary().
-write(Topic, Partition, Message) ->
-    gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, {write, Message}).
+      MessageSet :: [binary()].
+write(Topic, Partition, MessageSet) ->
+    gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, {write, MessageSet}).
 
 init([Topic, Partition]) ->
     Config = setup_config(),
@@ -68,8 +68,8 @@ init([Topic, Partition]) ->
                 config=Config
                }}.
 
-handle_call({write, Message}, _From, State) ->
-    State1 = write_message(Message, State),
+handle_call({write, MessageSet}, _From, State) ->
+    State1 = write_message_set(MessageSet, State),
     {reply, ok, State1}.
 
 handle_cast(_, State) ->
@@ -86,18 +86,17 @@ code_change(_, State, _) ->
 
 %% Internal functions
 
-write_message(Message, State=#state{id=Id,
-                                    pos=Position,
-                                    index_pos=IndexPosition,
-                                    byte_count=ByteCount}) ->
-    Bytes = vg_encode:log(Id, Message),
+write_message_set(MessageSet, State=#state{id=Id,
+                                           pos=Position,
+                                           byte_count=ByteCount}) ->
+    {NextId, Bytes} = vg_encode:message_set(Id, MessageSet),
     Size = erlang:iolist_size(Bytes),
     State1 = maybe_roll(Size, State),
     update_log(Bytes, State1),
-    update_index(State1),
-    State1#state{id=Id+1,
+    IndexPosition = update_index(State1),
+    State1#state{id=NextId,
                  pos=Position+Size,
-                 index_pos=IndexPosition+16,
+                 index_pos=IndexPosition,
                  byte_count=ByteCount+Size}.
 
 %% Create new log segment and index file if current segment is too large
@@ -220,7 +219,7 @@ find_in_log(_Log, Id, Position, {ok, <<Id:64/signed, _Size:32/signed, _CRC:32/si
 find_in_log(Log, Id, Position, {ok, <<_NewId:64/signed, Size:32/signed, _CRC:32/signed>>}) ->
     MessageSize = Size - 4,
     case file:read(Log, MessageSize + 16) of
-        {ok, <<M:MessageSize/binary, Data:16/binary>>} ->
+        {ok, <<_:MessageSize/binary, Data:16/binary>>} ->
             find_in_log(Log, Id, Position+MessageSize+16, {ok, Data});
         _ ->
             error
