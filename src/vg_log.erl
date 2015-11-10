@@ -1,3 +1,4 @@
+%%
 -module(vg_log).
 -behaviour(gen_server).
 
@@ -55,7 +56,7 @@ init([Topic, Partition]) ->
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
-    {ok, #state{id=Id+1,
+    {ok, #state{id=Id,
                 topic_dir=TopicDir,
                 byte_count=0,
                 pos=Position,
@@ -177,7 +178,7 @@ find_latest_id(TopicDirBinary) ->
             try
                 NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
                 file:close(Log),
-                {NewId+BaseOffset, LatestIndex, LatestLog}
+                {NewId+BaseOffset+1, LatestIndex, LatestLog}
             after
                 file:close(Log)
             end
