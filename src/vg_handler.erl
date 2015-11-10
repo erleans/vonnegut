@@ -18,7 +18,7 @@ loop(Socket, Transport) ->
             [Num, _] = binary:split(Data, <<"\r\n">>),
             Id = binary_to_integer(Num),
             {Filename, Position} = vg_index:find_in_index(<<"test">>, Id),
-            {ok, Fd} = file:open(Filename, [read, binary, raw]),
+            {ok, Fd} = vg_utils:open_read(Filename),
             Position1 = vg_log:find_in_log(Fd, Id, Position),
             send_chunks(Fd, Socket, Position1),
             loop(Socket, Transport),

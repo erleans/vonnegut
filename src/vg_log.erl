@@ -49,8 +49,8 @@ init([Topic, Partition]) ->
 
     {Id, LatestIndex, LatestLog} = find_latest_id(TopicDir),
     LastLogId = filename:basename(LatestLog, ".log"),
-    {ok, LogFD} = file:open(LatestLog, [append, raw]),
-    {ok, IndexFD} = file:open(LatestIndex, [append, raw]),
+    {ok, LogFD} = vg_utils:open_append(LatestLog),
+    {ok, IndexFD} = vg_utils:open_append(LatestIndex),
 
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
@@ -113,7 +113,7 @@ maybe_roll(Size, State=#state{id=Id,
                                              index_interval_bytes=IndexIntervalBytes}})
   when Position+Size > SegmentBytes
      ; ByteCount+Size >= IndexIntervalBytes
-       , IndexPosition+6 > IndexMaxBytes ->
+     , IndexPosition+6 > IndexMaxBytes ->
     ok = file:close(LogFile),
     ok = file:close(IndexFile),
 
@@ -152,8 +152,8 @@ new_index_log_files(TopicDir, Id) ->
     LogFilename = vg_utils:log_file(TopicDir, Id),
 
     %% Make sure empty?
-    {ok, IndexFile} = file:open(IndexFilename, [append, raw]),
-    {ok, LogFile} = file:open(LogFilename, [append, raw]),
+    {ok, IndexFile} = vg_utils:open_append(IndexFilename),
+    {ok, LogFile} = vg_utils:open_append(LogFilename),
     {IndexFile, LogFile}.
 
 %% Functions
@@ -175,7 +175,7 @@ find_latest_id(TopicDirBinary) ->
                           end,
             BaseOffset = list_to_integer(filename:basename(LatestIndex, ".index")),
             {Offset, Position} = latest_in_index(erlang:byte_size(Index), Index),
-            {ok, Log} = file:open(LatestLog, [read, raw, binary]),
+            {ok, Log} = vg_utils:open_read(LatestLog),
             try
                 NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
                 file:close(Log),
