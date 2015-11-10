@@ -156,8 +156,6 @@ new_index_log_files(TopicDir, Id) ->
     {ok, LogFile} = vg_utils:open_append(LogFilename),
     {IndexFile, LogFile}.
 
-%% Functions
-
 find_latest_id(TopicDirBinary) ->
     TopicDir = binary_to_list(TopicDirBinary),
     case lists:reverse(lists:sort(filelib:wildcard(filename:join(TopicDir, "*.log")))) of
