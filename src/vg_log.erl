@@ -12,7 +12,6 @@
          terminate/2,
          code_change/3]).
 
-
 -record(config, {log_dir              :: file:filename(),
                  segment_bytes        :: integer(),
                  index_max_bytes      :: integer(),
