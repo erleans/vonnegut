@@ -1,7 +1,6 @@
 vonnegut
 =====
 
-An OTP application
 
 Build
 -----

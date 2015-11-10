@@ -45,13 +45,7 @@ read(Topic, Partition, Id) ->
     gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, {read, Id}).
 
 init([Topic, Partition]) ->
-    {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
-    {ok, SegmentBytes} = application:get_env(vonnegut, segment_bytes),
-    {ok, IndexMaxBytes} = application:get_env(vonnegut, index_max_bytes),
-    {ok, IndexIntervalBytes} = application:get_env(vonnegut, index_interval_bytes),
-    ConfigRecord = #config{segment_bytes=SegmentBytes,
-                           index_max_bytes=IndexMaxBytes,
-                           index_interval_bytes=IndexIntervalBytes},
+    Config = setup_config(),
 
     TopicDir = filename:join(LogDir, <<Topic/binary, "-", Partition/binary>>),
     filelib:ensure_dir(filename:join(TopicDir, "ensure")),
@@ -78,7 +72,7 @@ init([Topic, Partition]) ->
                 index=Index,
                 id=Id,
 
-                config=ConfigRecord
+                config=Config
                }}.
 
 handle_call({read, Id}, _From, State=#state{index=Index,
@@ -166,9 +160,12 @@ update_index(State=#state{id=Id,
 update_index(State) ->
     State.
 
+%% Rolling log and index files, so open new empty ones for appending
 new_index_log_files(TopicDir, Id) ->
     IndexFilename = index_file(TopicDir, Id),
     LogFilename = log_file(TopicDir, Id),
+
+    %% Make sure empty?
     {ok, IndexFile} = file:open(IndexFilename, [append, raw]),
     {ok, LogFile} = file:open(LogFilename, [append, raw]),
     {IndexFile, LogFile}.
@@ -242,3 +239,12 @@ find_in_log(Log, Id, Position, {ok, <<_NewId:64/signed, Size:32/signed, _CRC:32/
     end;
 find_in_log(_, _, _, _) ->
     error.
+
+setup_config() ->
+    {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
+    {ok, SegmentBytes} = application:get_env(vonnegut, segment_bytes),
+    {ok, IndexMaxBytes} = application:get_env(vonnegut, index_max_bytes),
+    {ok, IndexIntervalBytes} = application:get_env(vonnegut, index_interval_bytes),
+    #config{segment_bytes=SegmentBytes,
+            index_max_bytes=IndexMaxBytes,
+            index_interval_bytes=IndexIntervalBytes}.
