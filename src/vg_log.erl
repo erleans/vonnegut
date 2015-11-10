@@ -55,7 +55,7 @@ init([Topic, Partition]) ->
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
-    {ok, #state{id=Id,
+    {ok, #state{id=Id+1,
                 topic_dir=TopicDir,
                 byte_count=0,
                 pos=Position,
@@ -174,7 +174,7 @@ find_latest_id(TopicDirBinary) ->
                                   file:read_file(LatestIndex)
                           end,
             BaseOffset = list_to_integer(filename:basename(LatestIndex, ".index")),
-            {Offset, Position} = latest_in_index(Index),
+            {Offset, Position} = latest_in_index(erlang:byte_size(Index), Index),
             {ok, Log} = file:open(LatestLog, [read, raw, binary]),
             try
                 NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
@@ -186,12 +186,12 @@ find_latest_id(TopicDirBinary) ->
     end.
 
 %% Find the last Id (Offset - BaseOffset) and file position in the index
-latest_in_index(<<>>) ->
+latest_in_index(_, <<>>) ->
     {0, 0};
-latest_in_index(<<Id:24/signed, Position:24/signed>>) ->
-    {Id, Position};
-latest_in_index(<<_Id:24/signed, _Position:24/signed, Rest/binary>>) ->
-    latest_in_index(Rest).
+latest_in_index(Size, Index) ->
+    Offset = Size - 6,
+    <<_:Offset/binary, Id:24/signed, Position:24/signed>> = Index,
+    {Id, Position}.
 
 %% Find the Id for the last log in the log file Log
 find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed, _CRC:32/signed>>}) ->
