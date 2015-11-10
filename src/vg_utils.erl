@@ -13,7 +13,7 @@ log_file(TopicDir, Id) ->
     filename:join(TopicDir, io_lib:format("~20.10.0b.log", [Id])).
 
 open_append(Filename) ->
-    file:open(Filename, [append, raw, exclusive]). %% {delayed_write, Size, Delay}
+    file:open(Filename, [append, raw, binary]). %% {delayed_write, Size, Delay}
 
 open_read(Filename) ->
     file:open(Filename, [read, raw, binary]).
