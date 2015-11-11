@@ -23,7 +23,7 @@ start_link(Topic, Partition, SegmentId) ->
                          ?MODULE, [Topic, Partition, SegmentId], []).
 
 -spec find_message_offset(Topic, Partition, SegmentId, MessageId) -> integer() when
-      Topic :: binary(),
+      Topic     :: binary(),
       Partition :: integer(),
       SegmentId :: integer(),
       MessageId :: integer().
@@ -70,8 +70,8 @@ code_change(_, State, _) ->
 
 %% Find the position in Log file of the start of a log with id Id
 -spec find_in_log(Log, Id, Position) -> integer() when
-      Log :: file:fd(),
-      Id :: integer(),
+      Log      :: file:fd(),
+      Id       :: integer(),
       Position :: integer().
 find_in_log(Log, Id, Position) ->
     {ok, _} = file:position(Log, Position),

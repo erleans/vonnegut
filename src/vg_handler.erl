@@ -20,13 +20,13 @@ loop(Socket, Transport) ->
             Partition = 0,
             Topic = <<"test">>,
 
-            {SegmentId, Position1} = vg_utils:find_segment_offset(Topic, Partition, MessageId),
+            {SegmentId, Position} = vg_utils:find_segment_offset(Topic, Partition, MessageId),
 
             {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
             TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
             File = vg_utils:log_file(TopicDir, SegmentId),
             {ok, Fd} = file:open(File, [read, binary, raw]),
-            send_chunks(Fd, Socket, Position1),
+            send_chunks(Fd, Socket, Position),
             file:close(Fd),
             loop(Socket, Transport);
         _ ->
