@@ -16,13 +16,18 @@ loop(Socket, Transport) ->
     case Transport:recv(Socket, 0, 5000) of
         {ok, Data} ->
             [Num, _] = binary:split(Data, <<"\r\n">>),
-            Id = binary_to_integer(Num),
-            {Filename, Position} = vg_index:find_in_index(<<"test">>, Id),
-            {ok, Fd} = vg_utils:open_read(Filename),
-            Position1 = vg_log:find_in_log(Fd, Id, Position),
-            send_chunks(Fd, Socket, Position1),
-            loop(Socket, Transport),
-            file:close(Fd);
+            MessageId = binary_to_integer(Num),
+            Partition = 0,
+            Topic = <<"test">>,
+            SegmentId = vg_utils:find_log_segment(Topic, Partition, MessageId),
+            Position1 = vg_log_segment:find_message_offset(Topic, Partition, SegmentId, MessageId),
+
+            {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
+            TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
+            File = vg_utils:log_file(TopicDir, SegmentId),
+            {ok, Fd} = file:open(File, [read, binary, raw]),
+            file:close(Fd),
+            loop(Socket, Transport);
         _ ->
             ok = Transport:close(Socket)
     end.

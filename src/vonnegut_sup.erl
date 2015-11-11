@@ -24,7 +24,7 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 create_topic(Topic) ->
-    supervisor:start_child(?SERVER, topic_childspec(Topic, [<<"0">>])).
+    supervisor:start_child(?SERVER, topic_childspec(Topic, [0])).
 
 %%====================================================================
 %% Supervisor callbacks
@@ -45,7 +45,7 @@ topic_childspecs(DataDir) ->
     TPDict = lists:foldl(fun(TP, Acc) ->
                                  case string:tokens(filename:basename(TP), "-") of
                                      [T, P] ->
-                                         dict:append_list(list_to_binary(T), [list_to_binary(P)], Acc);
+                                         dict:append_list(list_to_binary(T), [list_to_integer(P)], Acc);
                                      _ ->
                                          Acc
                                  end

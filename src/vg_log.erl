@@ -45,7 +45,7 @@ init([Topic, Partition]) ->
     Config = setup_config(),
 
     LogDir = Config#config.log_dir,
-    TopicDir = filename:join(LogDir, <<Topic/binary, "-", Partition/binary>>),
+    TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
     filelib:ensure_dir(filename:join(TopicDir, "ensure")),
 
     {Id, LatestIndex, LatestLog} = find_latest_id(TopicDir),
@@ -157,8 +157,7 @@ new_index_log_files(TopicDir, Id) ->
     {ok, LogFile} = vg_utils:open_append(LogFilename),
     {IndexFile, LogFile}.
 
-find_latest_id(TopicDirBinary) ->
-    TopicDir = binary_to_list(TopicDirBinary),
+find_latest_id(TopicDir) ->
     case lists:reverse(lists:sort(filelib:wildcard(filename:join(TopicDir, "*.log")))) of
         [] ->
             LatestIndex = vg_utils:index_file(TopicDir, 0),
