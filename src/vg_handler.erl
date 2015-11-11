@@ -26,6 +26,7 @@ loop(Socket, Transport) ->
             TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
             File = vg_utils:log_file(TopicDir, SegmentId),
             {ok, Fd} = file:open(File, [read, binary, raw]),
+            send_chunks(Fd, Socket, Position1),
             file:close(Fd),
             loop(Socket, Transport);
         _ ->

@@ -22,6 +22,13 @@
 start_link(Topic, Partitions) ->
     supervisor:start_link({via, gproc, {n,l,Topic}}, ?MODULE, [Topic, Partitions]).
 
+-spec start_segment(Topic, Partition, SegmentId) -> supervisor:startchild_ret() when
+      Topic     :: binary(),
+      Partition :: integer(),
+      SegmentId :: integer().
+start_segment(Topic, Partition, SegmentId) ->
+    supervisor:start_child(?SERVER, log_segment_childspec(Topic, Partition, SegmentId)).
+
 %%====================================================================
 %% Supervisor callbacks
 %%====================================================================
@@ -51,7 +58,11 @@ segments(Topic, Partition) ->
     {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
     TopicPartitionDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
     LogSegments = filelib:wildcard(filename:join(TopicPartitionDir, "*.log")),
-    [#{id      => {Topic, Partition, list_to_integer(filename:basename(LogSegment, ".log"))},
-       start   => {vg_log_segment, start_link, [Topic, Partition, list_to_integer(filename:basename(LogSegment, ".log"))]},
-       restart => permanent,
-       type    => worker} || LogSegment <- LogSegments].
+    [log_segment_childspec(Topic, Partition, list_to_integer(filename:basename(LogSegment, ".log")))
+    || LogSegment <- LogSegments].
+
+log_segment_childspec(Topic, Partition, LogSegment) ->
+    #{id      => {Topic, Partition, LogSegment},
+      start   => {vg_log_segment, start_link, [Topic, Partition, LogSegment]},
+      restart => permanent,
+      type    => worker}.

@@ -79,12 +79,14 @@ find_in_log(Log, Id, Position) ->
 
 find_in_log(_Log, Id, Position, {ok, <<Id:64/signed, _Size:32/signed>>}) ->
     Position;
-find_in_log(Log, Id, Position, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
+find_in_log(Log, Id, Position, {ok, <<_:64/signed, Size:32/signed>>}) ->
     case file:read(Log, Size + 12) of
-        {ok, <<_:Size/binary, Data:16/binary>>} ->
+        {ok, <<_:Size/binary, Data:12/binary>>} ->
             find_in_log(Log, Id, Position+Size+12, {ok, Data});
-        _ ->
-            NewId
+        {ok, <<_:Size/binary>>} ->
+            Position+Size+12;
+        eof ->
+            Position+Size+12
     end;
 find_in_log(_, _, _, _) ->
     error.

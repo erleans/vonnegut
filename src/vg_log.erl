@@ -3,8 +3,7 @@
 -behaviour(gen_server).
 
 -export([start_link/2,
-         write/3,
-         find_in_log/3]).
+         write/3]).
 
 -export([init/1,
          handle_call/3,
@@ -24,9 +23,10 @@
                 pos         :: integer(),
                 index_pos   :: integer(),
                 log_fd      :: file:fd(),
-                base_offset :: integer(),
                 segment_id  :: integer(),
                 index_fd    :: file:fd(),
+                topic       :: binary(),
+                partition   :: integer(),
 
                 config      :: #config{}
                }).
@@ -62,10 +62,10 @@ init([Topic, Partition]) ->
                 pos=Position,
                 index_pos=IndexPosition,
                 log_fd=LogFD,
-                segment_id=0,
-                base_offset=list_to_integer(LastLogId),
+                segment_id=list_to_integer(LastLogId),
                 index_fd=IndexFD,
-
+                topic=Topic,
+                partition=Partition,
                 config=Config
                }}.
 
@@ -109,6 +109,8 @@ maybe_roll(Size, State=#state{id=Id,
                               pos=Position,
                               byte_count=ByteCount,
                               index_pos=IndexPosition,
+                              topic=Topic,
+                              partition=Partition,
                               config=#config{segment_bytes=SegmentBytes,
                                              index_max_bytes=IndexMaxBytes,
                                              index_interval_bytes=IndexIntervalBytes}})
@@ -119,6 +121,7 @@ maybe_roll(Size, State=#state{id=Id,
     ok = file:close(IndexFile),
 
     {NewIndexFile, NewLogFile} = new_index_log_files(TopicDir, Id),
+    vg_topic_sup:start_segment(Topic, Partition, Id),
 
     State#state{log_fd=NewLogFile,
                 index_fd=NewIndexFile,
@@ -138,7 +141,7 @@ update_index(State=#state{id=Id,
                           index_fd=IndexFile,
                           byte_count=ByteCount,
                           index_pos=IndexPosition,
-                          base_offset=BaseOffset,
+                          segment_id=BaseOffset,
                           config=#config{index_interval_bytes=IndexIntervalBytes}})
   when ByteCount >= IndexIntervalBytes ->
     IndexEntry = <<(Id - BaseOffset):24/signed, Position:24/signed>>,
@@ -192,38 +195,15 @@ latest_in_index(Size, Index) ->
     {Id, Position}.
 
 %% Find the Id for the last log in the log file Log
-find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed, _CRC:32/signed>>}) ->
-    MessageSize = Size - 4,
-    case file:read(Log, MessageSize + 16) of
-        {ok, <<_:MessageSize/binary, Data:16/binary>>} ->
+find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
+    case file:read(Log, Size + 12) of
+        {ok, <<_:Size/binary, Data:12/binary>>} ->
             find_last_log(Log, NewId, {ok, Data});
         _ ->
             NewId
     end;
 find_last_log(_Log, Id, _) ->
     Id.
-
-%% Find the position in Log file of the start of a log with id Id
--spec find_in_log(Log, Id, Position) -> integer() when
-      Log :: file:fd(),
-      Id :: integer(),
-      Position :: integer().
-find_in_log(Log, Id, Position) ->
-    {ok, _} = file:position(Log, Position),
-    find_in_log(Log, Id, Position, file:read(Log, 16)).
-
-find_in_log(_Log, Id, Position, {ok, <<Id:64/signed, _Size:32/signed, _CRC:32/signed>>}) ->
-    Position;
-find_in_log(Log, Id, Position, {ok, <<_NewId:64/signed, Size:32/signed, _CRC:32/signed>>}) ->
-    MessageSize = Size - 4,
-    case file:read(Log, MessageSize + 16) of
-        {ok, <<_:MessageSize/binary, Data:16/binary>>} ->
-            find_in_log(Log, Id, Position+MessageSize+16, {ok, Data});
-        _ ->
-            error
-    end;
-find_in_log(_, _, _, _) ->
-    error.
 
 setup_config() ->
     {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
