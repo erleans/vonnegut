@@ -19,8 +19,8 @@ loop(Socket, Transport) ->
             MessageId = binary_to_integer(Num),
             Partition = 0,
             Topic = <<"test">>,
-            SegmentId = vg_utils:find_log_segment(Topic, Partition, MessageId),
-            Position1 = vg_log_segment:find_message_offset(Topic, Partition, SegmentId, MessageId),
+
+            {SegmentId, Position1} = vg_utils:find_segment_offset(Topic, Partition, MessageId),
 
             {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
             TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),

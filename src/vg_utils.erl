@@ -1,6 +1,7 @@
 -module(vg_utils).
 
 -export([find_log_segment/3,
+         find_segment_offset/3,
          index_file/2,
          log_file/2,
          open_append/1,
@@ -27,6 +28,14 @@ find_log_segment(Topic, Partition, MessageId) ->
             %% offset that is still less than the message offset
             lists:max(Matches)
     end.
+
+-spec find_segment_offset(Topic, Partition, MessageId) -> integer() when
+      Topic     :: binary(),
+      Partition :: integer(),
+      MessageId :: integer().
+find_segment_offset(Topic, Partition, MessageId) ->
+    SegmentId = find_log_segment(Topic, Partition, MessageId),
+    {SegmentId, vg_log_segment:find_message_offset(Topic, Partition, SegmentId, MessageId)}.
 
 %% Convenience functions for creating index and log file names
 index_file(TopicDir, Id) ->
