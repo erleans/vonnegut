@@ -19,8 +19,8 @@
 find_log_segment(Topic, Partition, MessageId) ->
     %% Find all registered log segments for topic-partition < the messageid we are looking for
     case gproc:select({l,n}, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
-                                    ?LOG_SEGMENT_GUARD(MessageId),
-                                    ?LOG_SEGMENT_RETURN}]) of
+                               ?LOG_SEGMENT_GUARD(MessageId),
+                               ?LOG_SEGMENT_RETURN}]) of
         [] ->
             0;
         Matches  ->

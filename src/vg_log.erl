@@ -167,32 +167,29 @@ find_latest_id(TopicDir) ->
             LatestLog = vg_utils:log_file(TopicDir, 0),
             {0, LatestIndex, LatestLog};
         [LatestLog | _] ->
-            {ok, Index} = case lists:reverse(lists:sort(filelib:wildcard(filename:join(TopicDir, "*.index")))) of
-                              [] ->
-                                  LatestIndex = vg_utils:index_file(TopicDir, 0),
-                                  {ok, <<>>};
-                              [LatestIndex | _] ->
-                                  file:read_file(LatestIndex)
-                          end,
-            BaseOffset = list_to_integer(filename:basename(LatestIndex, ".index")),
-            {Offset, Position} = latest_in_index(erlang:byte_size(Index), Index),
+            BaseOffset = list_to_integer(filename:basename(LatestLog, ".log")),
+            {Offset, Position} = last_in_index(TopicDir, BaseOffset),
             {ok, Log} = vg_utils:open_read(LatestLog),
             try
                 NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
-                file:close(Log),
-                {NewId+BaseOffset+1, LatestIndex, LatestLog}
+                {NewId+BaseOffset+1, vg_utils:log_file(TopicDir, BaseOffset), LatestLog}
             after
                 file:close(Log)
             end
     end.
 
-%% Find the last Id (Offset - BaseOffset) and file position in the index
-latest_in_index(_, <<>>) ->
-    {0, 0};
-latest_in_index(Size, Index) ->
-    Offset = Size - 6,
-    <<_:Offset/binary, Id:24/signed, Position:24/signed>> = Index,
-    {Id, Position}.
+last_in_index(TopicDir, BaseOffset) ->
+    {ok, Index} = vg_utils:open_read(vg_utils:index_file(TopicDir, BaseOffset)),
+    try
+        case file:pread(Index, {eof, 6}, 6) of
+            <<Offset:24/signed, Position:24/signed>> ->
+                {Offset, Position};
+            _ ->
+                {0, 0}
+        end
+    after
+        file:close(Index)
+    end.
 
 %% Find the Id for the last log in the log file Log
 find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
