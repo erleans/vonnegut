@@ -45,7 +45,15 @@ log_file(TopicDir, Id) ->
     filename:join(TopicDir, io_lib:format("~20.10.0b.log", [Id])).
 
 open_append(Filename) ->
-    file:open(Filename, [append, raw, binary]). %% {delayed_write, Size, Delay}
+    case application:get_env(vonnegut, delayed_write) of
+        {ok, true} ->
+            %% Buffer writes up to DelayedWriteSize bytes or DelayMS milliseconds to save on OS calls
+            {ok, DelayedWriteSize} = application:get_env(vonnegut, delayed_write_byte_size),
+            {ok, DelayMS} = application:get_env(vonnegut, delayed_write_milliseconds),
+            file:open(Filename, [append, raw, binary, {delayed_write, DelayedWriteSize, DelayMS}]);
+        _ ->
+            file:open(Filename, [append, raw, binary])
+    end.
 
 open_read(Filename) ->
     file:open(Filename, [read, raw, binary]).

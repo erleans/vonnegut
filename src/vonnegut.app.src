@@ -20,6 +20,10 @@
         {index_max_bytes, 10485760},
         {index_interval_bytes, 4096},
 
+        {write_delayed, false},
+        {delayed_write_byte_size, 64000}, %% 64kb
+        {delayed_write_milliseconds, 2000}, %% 2 seconds
+
         {num_partitions, 1}]},
   {modules, []},
 
