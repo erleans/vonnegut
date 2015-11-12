@@ -1,6 +1,7 @@
 -module(vg_utils).
 
 -export([find_log_segment/3,
+         find_active_segment/2,
          find_segment_offset/3,
          index_file/2,
          log_file/2,
@@ -26,6 +27,20 @@ find_log_segment(Topic, Partition, MessageId) ->
         Matches  ->
             %% Return largest, being the largest log segment
             %% offset that is still less than the message offset
+            lists:max(Matches)
+    end.
+
+-spec find_active_segment(Topic, Partition) -> integer() when
+      Topic     :: binary(),
+      Partition :: integer().
+find_active_segment(Topic, Partition) ->
+    %% Find all registered log segments for topic-partition < the messageid we are looking for
+    case gproc:select({l,n}, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
+                              [],
+                              ?LOG_SEGMENT_RETURN}]) of
+        [] ->
+            0;
+        Matches  ->
             lists:max(Matches)
     end.
 

@@ -8,7 +8,8 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/2]).
+-export([start_link/2,
+         start_segment/3]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -46,10 +47,12 @@ init([Topic, Partitions]) ->
 
 child_specs(Topic, Partition) ->
     Segments = segments(Topic, Partition),
-    [#{id      => {Topic, Partition},
-       start   => {vg_log, start_link, [Topic, Partition]},
-       restart => permanent,
-       type    => worker} | Segments].
+
+    %% Must start segments before partition proc so it can find which segment is active
+    Segments++[#{id      => {Topic, Partition},
+                 start   => {vg_log, start_link, [Topic, Partition]},
+                 restart => permanent,
+                 type    => worker}].
 
 -spec segments(Topic, Partition) -> [] when
       Topic     :: binary(),

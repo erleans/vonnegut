@@ -48,7 +48,7 @@ init([Topic, Partition]) ->
     TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
     filelib:ensure_dir(filename:join(TopicDir, "ensure")),
 
-    {Id, LatestIndex, LatestLog} = find_latest_id(TopicDir),
+    {Id, LatestIndex, LatestLog} = find_latest_id(TopicDir, Topic, Partition),
     LastLogId = filename:basename(LatestLog, ".log"),
     {ok, LogFD} = vg_utils:open_append(LatestLog),
     {ok, IndexFD} = vg_utils:open_append(LatestIndex),
@@ -160,26 +160,21 @@ new_index_log_files(TopicDir, Id) ->
     {ok, LogFile} = vg_utils:open_append(LogFilename),
     {IndexFile, LogFile}.
 
-find_latest_id(TopicDir) ->
-    case lists:reverse(lists:sort(filelib:wildcard(filename:join(TopicDir, "*.log")))) of
-        [] ->
-            LatestIndex = vg_utils:index_file(TopicDir, 0),
-            LatestLog = vg_utils:log_file(TopicDir, 0),
-            {0, LatestIndex, LatestLog};
-        [LatestLog | _] ->
-            BaseOffset = list_to_integer(filename:basename(LatestLog, ".log")),
-            {Offset, Position} = last_in_index(TopicDir, BaseOffset),
-            {ok, Log} = vg_utils:open_read(LatestLog),
-            try
-                NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
-                {NewId+BaseOffset+1, vg_utils:log_file(TopicDir, BaseOffset), LatestLog}
-            after
-                file:close(Log)
-            end
+find_latest_id(TopicDir, Topic, Partition) ->
+    SegmentId = vg_utils:find_active_segment(Topic, Partition),
+    IndexFilename = vg_utils:index_file(TopicDir, SegmentId),
+    {Offset, Position} = last_in_index(IndexFilename),
+    LogSegmentFilename = vg_utils:log_file(TopicDir, SegmentId),
+    {ok, Log} = vg_utils:open_read(LogSegmentFilename),
+    try
+        NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
+        {NewId+SegmentId+1, IndexFilename, LogSegmentFilename}
+    after
+        file:close(Log)
     end.
 
-last_in_index(TopicDir, BaseOffset) ->
-    {ok, Index} = vg_utils:open_read(vg_utils:index_file(TopicDir, BaseOffset)),
+last_in_index(IndexFilename) ->
+    {ok, Index} = vg_utils:open_read(IndexFilename),
     try
         case file:pread(Index, {eof, 6}, 6) of
             <<Offset:24/signed, Position:24/signed>> ->
