@@ -93,18 +93,17 @@ code_change(_, State, _) ->
 %% Internal functions
 
 write_message_set(MessageSet, State=#state{id=Id,
-                                           pos=Position,
-                                           byte_count=ByteCount,
-                                           config=#config{segment_bytes=SegmentBytes}}) ->
-    {NextId, Bytes} = vg_encode:message_set(Id, MessageSet),
-    Size = erlang:iolist_size(Bytes),
-    State1 = maybe_roll(Size, State),
-    update_log(Bytes, State1),
-    State2 = State1#state{byte_count=ByteCount+Size},
-    IndexPosition = update_index(State2),
-    State1#state{id=NextId,
-                 pos=Position+Size,
-                 index_pos=IndexPosition}.
+                                           byte_count=ByteCount}) ->
+    lists:foldl(fun(Message, StateAcc=#state{pos=Position}) ->
+                        {NextId, Size, Bytes} = vg_encode:message(Id, Message),
+                        StateAcc1 = maybe_roll(Size, StateAcc),
+                        update_log(Bytes, StateAcc1),
+                        StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
+                        IndexPosition = update_index(StateAcc2),
+                        StateAcc2#state{id=NextId,
+                                        pos=Position+Size,
+                                        index_pos=IndexPosition}
+                end, State, MessageSet).
 
 %% Create new log segment and index file if current segment is too large
 %% or if the index file is over its max and would be written to again.
