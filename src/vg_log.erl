@@ -92,17 +92,16 @@ code_change(_, State, _) ->
 
 %% Internal functions
 
-write_message_set(MessageSet, State=#state{id=Id,
-                                           byte_count=ByteCount}) ->
-    lists:foldl(fun(Message, StateAcc=#state{pos=Position}) ->
+write_message_set(MessageSet, State) ->
+    lists:foldl(fun(Message, StateAcc=#state{id=Id,
+                                             byte_count=ByteCount}) ->
                         {NextId, Size, Bytes} = vg_encode:message(Id, Message),
-                        StateAcc1 = maybe_roll(Size, StateAcc),
+                        StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
                         update_log(Bytes, StateAcc1),
                         StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
-                        IndexPosition = update_index(StateAcc2),
-                        StateAcc2#state{id=NextId,
-                                        pos=Position+Size,
-                                        index_pos=IndexPosition}
+                        StateAcc3 = update_index(StateAcc2),
+                        StateAcc3#state{id=NextId,
+                                        pos=Position1+Size}
                 end, State, MessageSet).
 
 %% Create new log segment and index file if current segment is too large
@@ -120,8 +119,8 @@ maybe_roll(Size, State=#state{id=Id,
                                              index_max_bytes=IndexMaxBytes,
                                              index_interval_bytes=IndexIntervalBytes}})
   when Position+Size > SegmentBytes
-     ; ByteCount+Size >= IndexIntervalBytes
-     , IndexPosition+6 > IndexMaxBytes ->
+     orelse (ByteCount+Size >= IndexIntervalBytes
+            andalso IndexPosition+6 > IndexMaxBytes) ->
     ok = file:close(LogFile),
     ok = file:close(IndexFile),
 
@@ -151,7 +150,8 @@ update_index(State=#state{id=Id,
   when ByteCount >= IndexIntervalBytes ->
     IndexEntry = <<(Id - BaseOffset):24/signed, Position:24/signed>>,
     ok = file:write(IndexFile, IndexEntry),
-    State#state{index_pos=IndexPosition+6};
+    State#state{index_pos=IndexPosition+6,
+                byte_count=0};
 update_index(State) ->
     State.
 

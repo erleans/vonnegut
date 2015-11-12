@@ -12,5 +12,5 @@ init_per_testcase(_, Config) ->
 end_per_testcase(_, Config) ->
     Config.
 
-delete_policy(Config) ->
+delete_policy(_Config) ->
     ok.
