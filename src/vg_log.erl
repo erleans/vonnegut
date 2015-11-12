@@ -163,7 +163,7 @@ new_index_log_files(TopicDir, Id) ->
 find_latest_id(TopicDir, Topic, Partition) ->
     SegmentId = vg_utils:find_active_segment(Topic, Partition),
     IndexFilename = vg_utils:index_file(TopicDir, SegmentId),
-    {Offset, Position} = last_in_index(IndexFilename),
+    {Offset, Position} = last_in_index(TopicDir, IndexFilename, Topic, Partition, SegmentId),
     LogSegmentFilename = vg_utils:log_file(TopicDir, SegmentId),
     {ok, Log} = vg_utils:open_read(LogSegmentFilename),
     try
@@ -173,17 +173,29 @@ find_latest_id(TopicDir, Topic, Partition) ->
         file:close(Log)
     end.
 
-last_in_index(IndexFilename) ->
-    {ok, Index} = vg_utils:open_read(IndexFilename),
-    try
-        case file:pread(Index, {eof, 6}, 6) of
-            <<Offset:24/signed, Position:24/signed>> ->
-                {Offset, Position};
-            _ ->
-                {0, 0}
-        end
-    after
-        file:close(Index)
+last_in_index(TopicDir, IndexFilename, Topic, Partition, SegmentId) ->
+    case vg_utils:open_read(IndexFilename) of
+        {error, enoent} when SegmentId =:= 0 ->
+            %% Index file doesn't exist, if this is the first segment (0)
+            %% we can just create the files assuming this is a topic creation.
+            %% Will fail if an empty topic-partition dir exists on boot since
+            %% vg_topic_sup will not be started yet.
+            {NewIndexFile, NewLogFile} = new_index_log_files(TopicDir, SegmentId),
+            file:close(NewIndexFile),
+            file:close(NewLogFile),
+            vg_topic_sup:start_segment(Topic, Partition, SegmentId),
+            {0, 0};
+        {ok, Index} ->
+            try
+                case file:pread(Index, {eof, 6}, 6) of
+                    <<Offset:24/signed, Position:24/signed>> ->
+                        {Offset, Position};
+                    _ ->
+                        {0, 0}
+                end
+            after
+                file:close(Index)
+            end
     end.
 
 %% Find the Id for the last log in the log file Log

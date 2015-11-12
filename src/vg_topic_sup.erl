@@ -36,9 +36,7 @@ start_segment(Topic, Partition, SegmentId) ->
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([Topic, Partitions]) ->
-
     ChildSpecs = lists:flatten([child_specs(Topic, Partition) || Partition <- Partitions]),
-
     {ok, {{one_for_one, 0, 1}, ChildSpecs}}.
 
 %%====================================================================
