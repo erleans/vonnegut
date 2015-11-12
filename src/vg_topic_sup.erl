@@ -28,7 +28,7 @@ start_link(Topic, Partitions) ->
       Partition :: integer(),
       SegmentId :: integer().
 start_segment(Topic, Partition, SegmentId) ->
-    supervisor:start_child(?SERVER, log_segment_childspec(Topic, Partition, SegmentId)).
+    supervisor:start_child({via, gproc, {n,l,Topic}}, log_segment_childspec(Topic, Partition, SegmentId)).
 
 %%====================================================================
 %% Supervisor callbacks

@@ -67,7 +67,7 @@ init([Topic, Partition]) ->
                 topic=Topic,
                 partition=Partition,
                 config=Config
-               }}.
+               }, 0}.
 
 handle_call({write, MessageSet}, _From, State) ->
     State1 = write_message_set(MessageSet, State),
@@ -76,6 +76,11 @@ handle_call({write, MessageSet}, _From, State) ->
 handle_cast(_, State) ->
     {noreply, State}.
 
+handle_info(timeout, State=#state{topic=Topic,
+                                  partition=Partition,
+                                  segment_id=SegmentId}) ->
+    vg_topic_sup:start_segment(Topic, Partition, SegmentId),
+    {noreply, State};
 handle_info(_, State) ->
     {noreply, State}.
 
@@ -89,16 +94,17 @@ code_change(_, State, _) ->
 
 write_message_set(MessageSet, State=#state{id=Id,
                                            pos=Position,
-                                           byte_count=ByteCount}) ->
+                                           byte_count=ByteCount,
+                                           config=#config{segment_bytes=SegmentBytes}}) ->
     {NextId, Bytes} = vg_encode:message_set(Id, MessageSet),
     Size = erlang:iolist_size(Bytes),
     State1 = maybe_roll(Size, State),
     update_log(Bytes, State1),
-    IndexPosition = update_index(State1),
+    State2 = State1#state{byte_count=ByteCount+Size},
+    IndexPosition = update_index(State2),
     State1#state{id=NextId,
                  pos=Position+Size,
-                 index_pos=IndexPosition,
-                 byte_count=ByteCount+Size}.
+                 index_pos=IndexPosition}.
 
 %% Create new log segment and index file if current segment is too large
 %% or if the index file is over its max and would be written to again.
@@ -163,17 +169,17 @@ new_index_log_files(TopicDir, Id) ->
 find_latest_id(TopicDir, Topic, Partition) ->
     SegmentId = vg_utils:find_active_segment(Topic, Partition),
     IndexFilename = vg_utils:index_file(TopicDir, SegmentId),
-    {Offset, Position} = last_in_index(TopicDir, IndexFilename, Topic, Partition, SegmentId),
+    {Offset, Position} = last_in_index(TopicDir, IndexFilename, SegmentId),
     LogSegmentFilename = vg_utils:log_file(TopicDir, SegmentId),
     {ok, Log} = vg_utils:open_read(LogSegmentFilename),
     try
         NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
-        {NewId+SegmentId+1, IndexFilename, LogSegmentFilename}
+        {NewId+SegmentId, IndexFilename, LogSegmentFilename}
     after
         file:close(Log)
     end.
 
-last_in_index(TopicDir, IndexFilename, Topic, Partition, SegmentId) ->
+last_in_index(TopicDir, IndexFilename, SegmentId) ->
     case vg_utils:open_read(IndexFilename) of
         {error, enoent} when SegmentId =:= 0 ->
             %% Index file doesn't exist, if this is the first segment (0)
@@ -183,7 +189,6 @@ last_in_index(TopicDir, IndexFilename, Topic, Partition, SegmentId) ->
             {NewIndexFile, NewLogFile} = new_index_log_files(TopicDir, SegmentId),
             file:close(NewIndexFile),
             file:close(NewLogFile),
-            vg_topic_sup:start_segment(Topic, Partition, SegmentId),
             {0, 0};
         {ok, Index} ->
             try
@@ -204,7 +209,7 @@ find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
         {ok, <<_:Size/binary, Data:12/binary>>} ->
             find_last_log(Log, NewId, {ok, Data});
         _ ->
-            NewId
+            NewId+1
     end;
 find_last_log(_Log, Id, _) ->
     Id.

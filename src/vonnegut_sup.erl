@@ -44,10 +44,12 @@ topic_childspecs(DataDir) ->
     TopicPartitions = filelib:wildcard(filename:join(DataDir, "*")),
     TPDict = lists:foldl(fun(TP, Acc) ->
                                  case string:tokens(filename:basename(TP), "-") of
-                                     [T, P] ->
-                                         dict:append_list(list_to_binary(T), [list_to_integer(P)], Acc);
-                                     _ ->
-                                         Acc
+                                     [_] ->
+                                         Acc;
+                                     L ->
+                                         [P | TopicR] = lists:reverse(L),
+                                         T = string:join(lists:reverse(TopicR), "-"),
+                                         dict:append_list(list_to_binary(T), [list_to_integer(P)], Acc)
                                  end
                          end, dict:new(), TopicPartitions),
 
