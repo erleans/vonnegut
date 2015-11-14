@@ -1,4 +1,6 @@
 [{<<"cf">>,{pkg,<<"cf">>,<<"0.2.1">>},1},
  {<<"erlware_commons">>,{pkg,<<"erlware_commons">>,<<"0.17.0">>},0},
+ {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.7">>},1},
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.5.0">>},0},
+ {<<"lager">>,{pkg,<<"lager">>,<<"3.0.1">>},0},
  {<<"ranch">>,{pkg,<<"ranch">>,<<"1.1.0">>},0}].

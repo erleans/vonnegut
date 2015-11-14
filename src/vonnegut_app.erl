@@ -16,7 +16,7 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-    {ok, _} = ranch:start_listener(vonnegut_listener, 1,
+    {ok, _} = ranch:start_listener(vonnegut_listener, 100,
                                    ranch_tcp, [{port, 5555}], vg_handler, []),
     vonnegut_sup:start_link().
 

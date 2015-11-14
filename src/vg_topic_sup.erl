@@ -50,6 +50,10 @@ child_specs(Topic, Partition) ->
     Segments++[#{id      => {Topic, Partition},
                  start   => {vg_log, start_link, [Topic, Partition]},
                  restart => permanent,
+                 type    => worker},
+               #{id      => {cleaner, Topic, Partition},
+                 start   => {vg_cleaner, start_link, [Topic, Partition]},
+                 restart => permanent,
                  type    => worker}].
 
 -spec segments(Topic, Partition) -> [] when
@@ -65,5 +69,5 @@ segments(Topic, Partition) ->
 log_segment_childspec(Topic, Partition, LogSegment) ->
     #{id      => {Topic, Partition, LogSegment},
       start   => {vg_log_segment, start_link, [Topic, Partition, LogSegment]},
-      restart => permanent,
+      restart => transient,
       type    => worker}.

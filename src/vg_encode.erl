@@ -17,7 +17,6 @@ message(Id, KeyValue) ->
     MessageSize = erlang:iolist_size(MessageIoList),
     {Id+1, MessageSize+12, [<<Id:64/signed, MessageSize:32/signed>>, MessageIoList]}.
 
-
 encode_kv({Key, Value}) ->
     [<<(erlang:byte_size(Key)):32/signed>>, Key, <<(erlang:byte_size(Value)):32/signed>>, Value];
 encode_kv(Value) ->

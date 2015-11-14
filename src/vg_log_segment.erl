@@ -3,7 +3,8 @@
 -behaviour(gen_server).
 
 -export([start_link/3,
-         find_message_offset/4]).
+         find_message_offset/4,
+         stop/3]).
 
 -export([init/1,
          handle_call/3,
@@ -29,6 +30,13 @@ start_link(Topic, Partition, SegmentId) ->
       MessageId :: integer().
 find_message_offset(Topic, Partition, SegmentId, MessageId) ->
     gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition, SegmentId}}}, {find_message_offset, MessageId}).
+
+-spec stop(Topic, Partition, SegmentId) -> ok when
+      Topic     :: binary(),
+      Partition :: integer(),
+      SegmentId :: integer().
+stop(Topic, Partition, SegmentId) ->
+    gen_server:stop({via, gproc, {n,l,{?MODULE, Topic, Partition, SegmentId}}}).
 
 init([Topic, Partition, SegmentId]) ->
     {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
