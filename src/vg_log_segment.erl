@@ -49,7 +49,6 @@ init([Topic, Partition, SegmentId]) ->
     file:advise(LogSegmentFD, 0, 0, random),
     {ok, IndexSegmentFD} = vg_utils:open_read(IndexSegmentFilename),
     file:advise(IndexSegmentFD, 0, 0, random),
-
     {ok, #state{topic_dir=TopicDir,
                 segment_offset=SegmentId,
                 log_segment_fd=LogSegmentFD,

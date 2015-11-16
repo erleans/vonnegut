@@ -1,14 +1,20 @@
 %%
 -module(vg_log).
--behaviour(gen_server).
+-behaviour(gen_leader).
 
 -export([start_link/2,
          write/3]).
 
 -export([init/1,
-         handle_call/3,
-         handle_cast/2,
-         handle_info/2,
+         handle_call/4,
+         handle_cast/3,
+         handle_info/3,
+         handle_leader_call/4,
+         handle_leader_cast/3,
+         handle_DOWN/3,
+         elected/2,
+         surrendered/3,
+         from_leader/3,
          terminate/2,
          code_change/3]).
 
@@ -32,14 +38,14 @@
                }).
 
 start_link(Topic, Partition) ->
-    gen_server:start_link({via, gproc, {n,l,{?MODULE,Topic,Partition}}}, ?MODULE, [Topic, Partition], []).
+    gen_leader:start_link({via, gproc, {n,l,{?MODULE,Topic,Partition}}}, <<Topic/binary, "-", (integer_to_binary(Partition))/binary>>, ?MODULE, [Topic, Partition], []).
 
 -spec write(Topic, Partition, MessageSet) -> ok when
       Topic :: binary(),
       Partition :: integer(),
       MessageSet :: [binary()].
 write(Topic, Partition, MessageSet) ->
-    gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, {write, MessageSet}).
+    gen_leader:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, {write, MessageSet}).
 
 init([Topic, Partition]) ->
     Config = setup_config(),
@@ -56,6 +62,9 @@ init([Topic, Partition]) ->
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
+    %% no timeout return value for gen_leader so use send_after
+    timer:send_after(0, timeout),
+
     {ok, #state{id=Id,
                 topic_dir=TopicDir,
                 byte_count=0,
@@ -67,22 +76,38 @@ init([Topic, Partition]) ->
                 topic=Topic,
                 partition=Partition,
                 config=Config
-               }, 0}.
+               }}.
 
-handle_call({write, MessageSet}, _From, State) ->
+handle_call({write, MessageSet}, _From, State, _Election) ->
     State1 = write_message_set(MessageSet, State),
     {reply, ok, State1}.
 
-handle_cast(_, State) ->
+handle_cast(_Msg, State, _Election) ->
     {noreply, State}.
 
 handle_info(timeout, State=#state{topic=Topic,
                                   partition=Partition,
-                                  segment_id=SegmentId}) ->
+                                  segment_id=SegmentId}, _Election) ->
     vg_topic_sup:start_segment(Topic, Partition, SegmentId),
-    {noreply, State};
-handle_info(_, State) ->
     {noreply, State}.
+
+elected(State, _Election) ->
+    {ok, [], State}.
+
+surrendered(State, _Synch, _Eelection) ->
+    {ok, State}.
+
+handle_leader_call(_Request, _From, State, _Election) ->
+    {reply, ok, State}.
+
+handle_leader_cast(_Request, State, _Election) ->
+    {noreply, State}.
+
+from_leader(_Synch, State, _Election) ->
+    {ok, State}.
+
+handle_DOWN(_Node, State, _Election) ->
+    {ok, State}.
 
 terminate(_Reason, _State) ->
     ok.

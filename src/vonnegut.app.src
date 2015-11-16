@@ -9,7 +9,8 @@
     lager,
     ranch,
     gproc,
-    erlware_commons
+    erlware_commons,
+    gen_leader_zk
    ]},
   {env,[{log_dirs, ["./data"]},
         {port, 5555},
