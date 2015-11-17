@@ -57,5 +57,7 @@ delete_policy(Config) ->
 
 %%
 
-dec_datetime_by_mins({Date, {H, M, S}}, Minutes) ->
-    {Date, {H, M-Minutes, S}}.
+dec_datetime_by_mins(DateTime, Minutes) ->
+    Seconds = calendar:datetime_to_gregorian_seconds(DateTime),
+    Seconds1 = Seconds - (Minutes * 60),
+    calendar:gregorian_seconds_to_datetime(Seconds1).
