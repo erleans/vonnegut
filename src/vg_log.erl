@@ -83,13 +83,13 @@ handle_call({write, MessageSet}, _From, State, _Election) ->
     {reply, ok, State1}.
 
 handle_cast(_Msg, State, _Election) ->
-    {noreply, State}.
+    {ok, State}.
 
 handle_info(timeout, State=#state{topic=Topic,
                                   partition=Partition,
                                   segment_id=SegmentId}, _Election) ->
     vg_topic_sup:start_segment(Topic, Partition, SegmentId),
-    {noreply, State}.
+    {ok, State}.
 
 elected(State, _Election) ->
     {ok, [], State}.
@@ -101,7 +101,7 @@ handle_leader_call(_Request, _From, State, _Election) ->
     {reply, ok, State}.
 
 handle_leader_cast(_Request, State, _Election) ->
-    {noreply, State}.
+    {ok, State}.
 
 from_leader(_Synch, State, _Election) ->
     {ok, State}.
@@ -217,7 +217,7 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
         {ok, Index} ->
             try
                 case file:pread(Index, {eof, 6}, 6) of
-                    <<Offset:24/signed, Position:24/signed>> ->
+                    {ok, <<Offset:24/signed, Position:24/signed>>} ->
                         {Offset, Position};
                     _ ->
                         {0, 0}

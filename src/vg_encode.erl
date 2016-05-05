@@ -8,8 +8,8 @@
 %% <<Id:64, MessageSize:32, Crc:32, MagicByte:8, Attributes:8, Key/Value>>
 -spec message(Id, Values) -> EncodedLog when
       Id :: integer(),
-      Values :: binary() | {binary(), binary()},
-      EncodedLog :: iolist().
+      Values :: binary() | {bitstring(), bitstring()},
+      EncodedLog :: {integer(), pos_integer(), iolist()}.
 message(Id, KeyValue) ->
     KV = encode_kv(KeyValue),
     CRC = erlang:crc32(KV),
