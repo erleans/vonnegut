@@ -1,4 +1,4 @@
--sname vg
+-name ${NODE}
 
 -setcookie vonnegut
 

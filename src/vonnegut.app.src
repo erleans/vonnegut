@@ -7,9 +7,9 @@
    [kernel,
     stdlib,
     lager,
-    ranch,
     gproc,
-    erlware_commons
+    erlware_commons,
+    hash_ring
    ]},
   {env,[{log_dirs, ["./data"]},
         {port, 5555},

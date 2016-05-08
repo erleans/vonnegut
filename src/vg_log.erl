@@ -1,9 +1,10 @@
 %%
 -module(vg_log).
+
 -behaviour(gen_server).
 
--export([start_link/2,
-         write/3]).
+-export([start/2]).
+-export([write/2]).
 
 -export([init/1,
          handle_call/3,
@@ -31,20 +32,16 @@
                 config      :: #config{}
                }).
 
-start_link(Topic, Partition) ->
-    gen_server:start_link({via, gproc, {n,l,{?MODULE,Topic,Partition}}}, ?MODULE, [Topic, Partition], []).
+start(Topic, Partition) ->
+    gen_server:start(?MODULE, [Topic, Partition], []).
 
--spec write(Topic, Partition, MessageSet) -> ok when
-      Topic :: binary(),
-      Partition :: integer(),
-      MessageSet :: [binary()].
-write(Topic, Partition, MessageSet) ->
-    gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, {write, MessageSet}).
+write(Pid, MessageSet) ->
+    gen_server:call(Pid, {write, MessageSet}).
 
 init([Topic, Partition]) ->
     Config = setup_config(),
-
-    LogDir = Config#config.log_dir,
+    Partition = 0,
+    LogDir = Config#config.log_dir ++ atom_to_list(node()),
     TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
     filelib:ensure_dir(filename:join(TopicDir, "ensure")),
 
@@ -67,7 +64,8 @@ init([Topic, Partition]) ->
                 topic=Topic,
                 partition=Partition,
                 config=Config
-               }, 0}.
+               }}.
+
 
 handle_call({write, MessageSet}, _From, State) ->
     State1 = write_message_set(MessageSet, State),
@@ -76,10 +74,7 @@ handle_call({write, MessageSet}, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info(timeout, State=#state{topic=Topic,
-                                  partition=Partition,
-                                  segment_id=SegmentId}) ->
-    vg_topic_sup:start_segment(Topic, Partition, SegmentId),
+handle_info(_, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -88,7 +83,7 @@ terminate(_Reason, _State) ->
 code_change(_, State, _) ->
     {ok, State}.
 
-%% Internal functions
+%%
 
 write_message_set(MessageSet, State) ->
     lists:foldl(fun(Message, StateAcc=#state{id=Id,

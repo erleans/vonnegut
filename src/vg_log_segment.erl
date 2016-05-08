@@ -20,8 +20,10 @@
                }).
 
 start_link(Topic, Partition, SegmentId) ->
-    gen_server:start_link({via, gproc, {n,l,{?MODULE,Topic,Partition,SegmentId}}},
-                         ?MODULE, [Topic, Partition, SegmentId], []).
+    {ok, Pid} = gen_server:start_link({via, gproc, {n,l,{?MODULE,Topic,Partition,SegmentId}}},
+                                      ?MODULE, [Topic, Partition, SegmentId], []),
+    io:format("Pid ~p~n", [Pid]),
+    {ok, Pid}.
 
 -spec find_message_offset(Topic, Partition, SegmentId, MessageId) -> integer() when
       Topic     :: binary(),

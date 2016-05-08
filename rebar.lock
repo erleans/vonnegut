@@ -1,14 +1,6 @@
 [{<<"cf">>,{pkg,<<"cf">>,<<"0.2.1">>},1},
- {<<"erlware_commons">>,{pkg,<<"erlware_commons">>,<<"0.17.0">>},0},
- {<<"erlzk">>,
-  {git,"git://github.com/huaban/erlzk.git",
-       {ref,"adcc1908f6a984e7c842859183a5d25c4a607c1e"}},
-  1},
- {<<"gen_leader_zk">>,
-  {git,"https://github.com/tsloughter/gen_leader_zk.git",
-       {ref,"0e9843b4bac1f85143b7ff7856b5eab5e13c4a32"}},
-  0},
+ {<<"erlware_commons">>,{pkg,<<"erlware_commons">>,<<"0.19.0">>},0},
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.7">>},1},
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.5.0">>},0},
- {<<"lager">>,{pkg,<<"lager">>,<<"3.0.1">>},0},
- {<<"ranch">>,{pkg,<<"ranch">>,<<"1.1.0">>},0}].
+ {<<"hash_ring">>,{pkg,<<"hash_ring">>,<<"0.4.0">>},0},
+ {<<"lager">>,{pkg,<<"lager">>,<<"3.0.2">>},0}].
