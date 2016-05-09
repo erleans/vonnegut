@@ -3,4 +3,12 @@
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.7">>},1},
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.5.0">>},0},
  {<<"hash_ring">>,{pkg,<<"hash_ring">>,<<"0.4.0">>},0},
- {<<"lager">>,{pkg,<<"lager">>,<<"3.0.2">>},0}].
+ {<<"lager">>,{pkg,<<"lager">>,<<"3.0.2">>},0},
+ {<<"sidejob">>,
+  {git,"git://github.com/basho/sidejob.git",
+       {ref,"9cd6bf566e8a0b04b24419c51117a8b9296a9c6a"}},
+  1},
+ {<<"teleport">>,
+  {git,"https://github.com/tsloughter/teleport.git",
+       {ref,"c785e40b03319dd1b8431423465233021c01d20c"}},
+  0}].

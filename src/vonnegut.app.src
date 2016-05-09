@@ -8,6 +8,7 @@
     stdlib,
     lager,
     gproc,
+    teleport,
     erlware_commons,
     hash_ring
    ]},

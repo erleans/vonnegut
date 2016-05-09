@@ -33,11 +33,16 @@
                 config      :: #config{}
                }).
 
+-define(SERVER(Topic, Partition), binary_to_atom(<<Topic/binary, Partition>>, utf8)).
+
 start_link(Topic, Partition, NextBrick) ->
-    gen_server:start_link({local, binary_to_atom(<<Topic/binary, Partition>>, utf8)}, ?MODULE, [Topic, Partition, NextBrick], []).
+    gen_server:start_link({local, ?SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick], []).
 
 write(Topic, Partition, MessageSet) ->
-    gen_server:call(binary_to_atom(<<Topic/binary, Partition>>, utf8), {write, MessageSet}).
+    gen_server:call(?SERVER(Topic, Partition), {write, MessageSet}).
+
+update_next_brick(Topic, Partition, NextBrick) ->
+    gen_server:call(?SERVER(Topic, Partition), {update_next_brick, NextBrick}).
 
 init([Topic, Partition, NextBrick]) ->
     Config = setup_config(),
@@ -77,7 +82,7 @@ handle_call({write, MessageSet}, _From, State=#state{topic=Topic,
         last ->
             ok;
         _ ->
-            gen_server:call({binary_to_atom(<<Topic/binary, Partition>>, utf8), NextBrick}, {write, MessageSet})
+            teleport:gs_call({binary_to_atom(<<Topic/binary, Partition>>, utf8), NextBrick}, {write, MessageSet}, 5000)
     end,
     {reply, ok, State1}.
 
