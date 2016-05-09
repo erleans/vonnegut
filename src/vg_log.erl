@@ -3,8 +3,8 @@
 
 -behaviour(gen_server).
 
--export([start/2]).
--export([write/2]).
+-export([start_link/3]).
+-export([write/3]).
 
 -export([init/1,
          handle_call/3,
@@ -20,6 +20,7 @@
 
 -record(state, {topic_dir   :: file:filename(),
                 id          :: integer(),
+                next_brick  :: node(),
                 byte_count  :: integer(),
                 pos         :: integer(),
                 index_pos   :: integer(),
@@ -32,13 +33,13 @@
                 config      :: #config{}
                }).
 
-start(Topic, Partition) ->
-    gen_server:start(?MODULE, [Topic, Partition], []).
+start_link(Topic, Partition, NextBrick) ->
+    gen_server:start_link({local, binary_to_atom(<<Topic/binary, Partition>>, utf8)}, ?MODULE, [Topic, Partition, NextBrick], []).
 
-write(Pid, MessageSet) ->
-    gen_server:call(Pid, {write, MessageSet}).
+write(Topic, Partition, MessageSet) ->
+    gen_server:call(binary_to_atom(<<Topic/binary, Partition>>, utf8), {write, MessageSet}).
 
-init([Topic, Partition]) ->
+init([Topic, Partition, NextBrick]) ->
     Config = setup_config(),
     Partition = 0,
     LogDir = Config#config.log_dir ++ atom_to_list(node()),
@@ -54,6 +55,7 @@ init([Topic, Partition]) ->
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
     {ok, #state{id=Id,
+                next_brick=NextBrick,
                 topic_dir=TopicDir,
                 byte_count=0,
                 pos=Position,
@@ -67,8 +69,16 @@ init([Topic, Partition]) ->
                }}.
 
 
-handle_call({write, MessageSet}, _From, State) ->
+handle_call({write, MessageSet}, _From, State=#state{topic=Topic,
+                                                     partition=Partition,
+                                                     next_brick=NextBrick}) ->
     State1 = write_message_set(MessageSet, State),
+    case NextBrick of
+        last ->
+            ok;
+        _ ->
+            gen_server:call({binary_to_atom(<<Topic/binary, Partition>>, utf8), NextBrick}, {write, MessageSet})
+    end,
     {reply, ok, State1}.
 
 handle_cast(_Msg, State) ->

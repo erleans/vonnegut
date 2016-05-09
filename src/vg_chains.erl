@@ -1,9 +1,10 @@
--module(vonnegut_cluster).
+-module(vg_chains).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/0,
+         chain/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -16,6 +17,9 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+chain(Topic, Partition) ->
+    gen_server:call(?SERVER, {chain, Topic, Partition}).
+
 init([]) ->
     net_kernel:monitor_nodes(true, [nodedown_reason]),
     {ok, NodeList} = application:get_env(vonnegut, nodes),
@@ -25,9 +29,9 @@ init([]) ->
     Ring = hash_ring:make(Nodes),
     {ok, #state{ring=Ring}}.
 
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call({chain, Topic, Partition}, _From, State=#state{ring=Ring}) ->
+    Chain = hash_ring:collect_nodes({Topic, Partition}, 3, Ring),
+    {reply, Chain, State}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.

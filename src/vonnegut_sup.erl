@@ -33,12 +33,14 @@ create_topic(Topic) ->
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
     DataDir = "./data",
-    topic_childspecs(DataDir),
+    Topics = topic_childspecs(DataDir),
 
-    ClusterWatcher = {vonnegut_cluster, {vonnegut_cluster, start_link, []},
-                      permanent, 20000, worker, [vonnegut_cluster]},
+    Chains = {vg_chains, {vg_chains, start_link, []},
+              permanent, 20000, worker, [vg_chains]},
+    TopicServer = {vg_topics, {vg_topics, start_link, []},
+                   permanent, 20000, worker, [vg_topics]},
 
-    {ok, {{one_for_one, 10, 30}, [ClusterWatcher]}}.
+    {ok, {{one_for_one, 10, 30}, [Chains, TopicServer | Topics]}}.
 
 %%====================================================================
 %% Internal functions

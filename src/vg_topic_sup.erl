@@ -45,10 +45,19 @@ init([Topic, Partitions]) ->
 
 child_specs(Topic, Partition) ->
     Segments = segments(Topic, Partition),
+    Chain = vg_chains:chain(Topic, Partition),
+    NextBrick = case lists:dropwhile(fun({_, Node, _, _}) -> Node =/= node() end, Chain) of
+                    [_, {_, N, _, _} | _] ->
+                        N;
+                    _ ->
+                        last
+                end,
+
+    lager:info("topic=~s partition=~p chain=~p", [Topic, Partition, NextBrick]),
 
     %% Must start segments before partition proc so it can find which segment is active
     Segments++[#{id      => {Topic, Partition},
-                 start   => {vg_log, start_link, [Topic, Partition]},
+                 start   => {vg_log, start_link, [Topic, Partition, NextBrick]},
                  restart => permanent,
                  type    => worker},
                #{id      => {cleaner, Topic, Partition},
