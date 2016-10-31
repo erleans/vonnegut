@@ -1,14 +1,20 @@
+{"1.1.0",
 [{<<"cf">>,{pkg,<<"cf">>,<<"0.2.1">>},1},
- {<<"erlware_commons">>,{pkg,<<"erlware_commons">>,<<"0.19.0">>},0},
- {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.7">>},1},
- {<<"gproc">>,{pkg,<<"gproc">>,<<"0.5.0">>},0},
+ {<<"erlware_commons">>,{pkg,<<"erlware_commons">>,<<"0.21.0">>},0},
+ {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.8">>},1},
+ {<<"gproc">>,{pkg,<<"gproc">>,<<"0.6.1">>},0},
  {<<"hash_ring">>,{pkg,<<"hash_ring">>,<<"0.4.0">>},0},
- {<<"lager">>,{pkg,<<"lager">>,<<"3.0.2">>},0},
- {<<"sidejob">>,
-  {git,"git://github.com/basho/sidejob.git",
-       {ref,"9cd6bf566e8a0b04b24419c51117a8b9296a9c6a"}},
-  1},
- {<<"teleport">>,
-  {git,"https://github.com/tsloughter/teleport.git",
-       {ref,"c785e40b03319dd1b8431423465233021c01d20c"}},
-  0}].
+ {<<"lager">>,{pkg,<<"lager">>,<<"3.2.1">>},0},
+ {<<"shackle">>,
+  {git,"https://github.com/lpgauth/shackle.git",
+       {ref,"c11ce71fbf971b7b3bdf8f6784c57108f682cd7d"}},
+  1}]}.
+[
+{pkg_hash,[
+ {<<"cf">>, <<"69D0B1349FD4D7D4DC55B7F407D29D7A840BF9A1EF5AF529F1EBE0CE153FC2AB">>},
+ {<<"erlware_commons">>, <<"A04433071AD7D112EDEFC75AC77719DD3E6753E697AC09428FC83D7564B80B15">>},
+ {<<"goldrush">>, <<"2024BA375CEEA47E27EA70E14D2C483B2D8610101B4E852EF7F89163CDB6E649">>},
+ {<<"gproc">>, <<"4579663E5677970758A05D8F65D13C3E9814EC707AD51D8DCEF7294EDA1A730C">>},
+ {<<"hash_ring">>, <<"5B6FC75DA078865DD0E0007E4145A3E27FF07963E090F822FF99349A577296ED">>},
+ {<<"lager">>, <<"EEF4E18B39E4195D37606D9088EA05BF1B745986CF8EC84F01D332456FE88D17">>}]}
+].

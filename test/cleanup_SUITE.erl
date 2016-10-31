@@ -31,7 +31,7 @@ delete_policy(Config) ->
     vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
-    vg:write(Topic, [crypto:rand_bytes(60), crypto:rand_bytes(60)]),
+    vg:write(Topic, [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60)]),
 
     %% Verify 2 segments have been created
     Segment0 = filename:join([TopicPartitionDir, "00000000000000000000.log"]),

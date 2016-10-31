@@ -32,15 +32,15 @@ create_topic(Topic) ->
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
-    DataDir = "./data",
-    Topics = topic_childspecs(DataDir),
+    {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
+    Topics = topic_childspecs(LogDir ++ atom_to_list(node())),
 
-    Chains = {vg_chains, {vg_chains, start_link, []},
-              permanent, 20000, worker, [vg_chains]},
+    %% Chains = {vg_chains, {vg_chains, start_link, []},
+    %%           permanent, 20000, worker, [vg_chains]},
     TopicServer = {vg_topics, {vg_topics, start_link, []},
                    permanent, 20000, worker, [vg_topics]},
 
-    {ok, {{one_for_one, 10, 30}, [Chains, TopicServer | Topics]}}.
+    {ok, {{one_for_one, 10, 30}, [TopicServer | Topics]}}.
 
 %%====================================================================
 %% Internal functions
@@ -64,5 +64,5 @@ topic_childspecs(DataDir) ->
 topic_childspec(Topic, Partitions) ->
     #{id      => Topic,
       start   => {vg_topic_sup, start_link, [Topic, Partitions]},
-      restart => transient,
+      restart => permanent,
       type    => supervisor}.

@@ -29,9 +29,9 @@ message_set_larger_than_max_segment(Config) ->
     vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
-    vg:write(Topic, [crypto:rand_bytes(60), crypto:rand_bytes(60),
-                     crypto:rand_bytes(6), crypto:rand_bytes(6),
-                     crypto:rand_bytes(60)]),
+    vg:write(Topic, [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
+                     crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
+                     crypto:strong_rand_bytes(60)]),
 
     %% Total size of a 60 byte message when written to log becomes 86 bytes
     %% Since index interval is 24 and 86 > 24, 1 index entry of 6 bytes should exist for each as well

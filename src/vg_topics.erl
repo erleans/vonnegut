@@ -18,8 +18,8 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 create_topic(Topic) ->
-    Chain = vg_chains:chain(Topic, 0),
-    gen_server:call(?SERVER, {create_topic, Topic, 0, Chain}).
+    %%Chain = vg_chains:chain(Topic, 0),
+    gen_server:call(?SERVER, {create_topic, Topic, 0}).
 
 init([]) ->
     {ok, #state{}}.

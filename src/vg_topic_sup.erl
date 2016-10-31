@@ -45,38 +45,40 @@ init([Topic, Partitions]) ->
 
 child_specs(Topic, Partition) ->
     Segments = segments(Topic, Partition),
-    Chain = vg_chains:chain(Topic, Partition),
-    NextBrick = case lists:dropwhile(fun({_, Node, _, _}) -> Node =/= node() end, Chain) of
-                    [_, {_, N, _, _} | _] ->
-                        N;
-                    _ ->
-                        last
-                end,
-
-    lager:info("topic=~s partition=~p chain=~p", [Topic, Partition, NextBrick]),
+    %% Chain = vg_chains:chain(Topic, Partition),
+    %% NextBrick = case lists:dropwhile(fun({_, Node, _, _}) -> Node =/= node() end, Chain) of
+    %%                 [_, {_, N, _, _} | _] ->
+    %%                     N;
+    %%                 _ ->
+    %%                     last
+    %%             end,
 
     %% Must start segments before partition proc so it can find which segment is active
-    Segments++[#{id      => {Topic, Partition},
-                 start   => {vg_log, start_link, [Topic, Partition, NextBrick]},
-                 restart => permanent,
-                 type    => worker},
-               #{id      => {cleaner, Topic, Partition},
-                 start   => {vg_cleaner, start_link, [Topic, Partition]},
-                 restart => permanent,
-                 type    => worker}].
+    [#{id      => {Topic, Partition},
+       start   => {vg_log, start_link, [Topic, Partition, last]},
+       restart => permanent,
+       type    => worker},
+     #{id      => {cleaner, Topic, Partition},
+       start   => {vg_cleaner, start_link, [Topic, Partition]},
+       restart => permanent,
+       type    => worker} | Segments].
 
 -spec segments(Topic, Partition) -> [] when
       Topic     :: binary(),
       Partition :: integer().
 segments(Topic, Partition) ->
     {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
-    TopicPartitionDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
-    LogSegments = filelib:wildcard(filename:join(TopicPartitionDir, "*.log")),
-    [log_segment_childspec(Topic, Partition, list_to_integer(filename:basename(LogSegment, ".log")))
-    || LogSegment <- LogSegments].
+    TopicPartitionDir = filename:join(LogDir ++ atom_to_list(node()), [binary_to_list(Topic), "-", integer_to_list(Partition)]),
+    case filelib:wildcard(filename:join(TopicPartitionDir, "*.log")) of
+        [] ->
+            [log_segment_childspec(Topic, Partition, 0)];
+        LogSegments ->
+            [log_segment_childspec(Topic, Partition, list_to_integer(filename:basename(LogSegment, ".log")))
+            || LogSegment <- LogSegments]
+    end.
 
 log_segment_childspec(Topic, Partition, LogSegment) ->
     #{id      => {Topic, Partition, LogSegment},
       start   => {vg_log_segment, start_link, [Topic, Partition, LogSegment]},
-      restart => transient,
+      restart => permanent,
       type    => worker}.

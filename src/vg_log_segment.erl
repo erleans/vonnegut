@@ -40,7 +40,8 @@ stop(Topic, Partition, SegmentId) ->
 
 init([Topic, Partition, SegmentId]) ->
     {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
-    TopicDir = filename:join(LogDir, <<Topic/binary, "-", (ec_cnv:to_binary(Partition))/binary>>),
+    LogDir1 = LogDir ++ atom_to_list(node()),
+    TopicDir = filename:join(LogDir1, <<Topic/binary, "-", (ec_cnv:to_binary(Partition))/binary>>),
     LogSegmentFilename = vg_utils:log_file(TopicDir, SegmentId),
     IndexSegmentFilename = vg_utils:index_file(TopicDir, SegmentId),
 
@@ -96,4 +97,4 @@ find_in_log(Log, Id, Position, {ok, <<_:64/signed, Size:32/signed>>}) ->
             Position+Size+12
     end;
 find_in_log(_, _, _, _) ->
-    error.
+    0.

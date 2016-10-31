@@ -33,10 +33,10 @@
                 config      :: #config{}
                }).
 
--define(SERVER(Topic, Partition), binary_to_atom(<<Topic/binary, Partition>>, utf8)).
+-define(SERVER(Topic, Partition), {via, gproc, {n,l,{Topic,Partition}}}). % binary_to_atom(<<Topic/binary, Partition>>, utf8)).
 
 start_link(Topic, Partition, NextBrick) ->
-    gen_server:start_link({local, ?SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick], []).
+    gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick], []).
 
 write(Topic, Partition, MessageSet) ->
     gen_server:call(?SERVER(Topic, Partition), {write, MessageSet}).
