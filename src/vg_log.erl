@@ -47,7 +47,7 @@ write(Topic, Partition, MessageSet) ->
 init([Topic, Partition, NextBrick]) ->
     Config = setup_config(),
     Partition = 0,
-    LogDir = Config#config.log_dir ++ atom_to_list(node()),
+    LogDir = Config#config.log_dir,
     TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
     filelib:ensure_dir(filename:join(TopicDir, "ensure")),
 

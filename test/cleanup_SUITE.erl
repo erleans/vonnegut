@@ -22,12 +22,11 @@ init_per_testcase(_, Config) ->
 end_per_testcase(_, Config) ->
     Config.
 
-delete_policy(Config) ->
-    PrivDir = ?config(priv_dir, Config),
+delete_policy(_Config) ->
     {ok, LogRetentionMinutes} = application:get_env(vonnegut, log_retention_minutes),
     Topic = vg_test_utils:create_random_name(<<"test_topic">>),
-    TopicPartition = <<Topic/binary, "-0">>,
-    TopicPartitionDir = binary_to_list(filename:join([PrivDir, "data", TopicPartition])),
+    Partition = 0,
+    TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
     vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 

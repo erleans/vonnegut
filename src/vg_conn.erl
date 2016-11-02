@@ -96,18 +96,16 @@ handle_request(<<ApiKey:16/signed, _ApiVersion:16/signed, _CorrelationId:32/sign
 handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
                                  _MinBytes:32/signed, NumTopics:32/signed, TopicsRaw/binary>>, Socket) ->
     {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], Rest} = parse_topics(NumTopics, TopicsRaw),
-
     {SegmentId, Position} = vg_utils:find_segment_offset(Topic, Partition, Offset),
-    {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
-    LogDir1 =  LogDir ++ atom_to_list(node()),
-    TopicDir = filename:join(LogDir1, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
-    File = vg_utils:log_file(TopicDir, SegmentId),
+
+    File = vg_utils:log_file(Topic, Partition, SegmentId),
     {ok, Fd} = file:open(File, [read, binary, raw]),
-    {ok, _} = file:sendfile(Fd, Socket, Position, 0, []),
-    file:close(Fd),
-
-    Rest.
-
+    try
+        {ok, _} = file:sendfile(Fd, Socket, Position, 0, []),
+        Rest
+    after
+        file:close(Fd)
+    end.
 
 -spec parse_topics(non_neg_integer(), binary()) -> {[topic_partition()], binary()}.
 parse_topics(Num, Raw) ->

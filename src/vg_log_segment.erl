@@ -39,9 +39,7 @@ stop(Topic, Partition, SegmentId) ->
     gen_server:stop({via, gproc, {n,l,{?MODULE, Topic, Partition, SegmentId}}}).
 
 init([Topic, Partition, SegmentId]) ->
-    {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
-    LogDir1 = LogDir ++ atom_to_list(node()),
-    TopicDir = filename:join(LogDir1, <<Topic/binary, "-", (ec_cnv:to_binary(Partition))/binary>>),
+    TopicDir = vg_utils:topic_dir(Topic, Partition),
     LogSegmentFilename = vg_utils:log_file(TopicDir, SegmentId),
     IndexSegmentFilename = vg_utils:index_file(TopicDir, SegmentId),
 

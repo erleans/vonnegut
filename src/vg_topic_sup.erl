@@ -67,9 +67,8 @@ child_specs(Topic, Partition) ->
       Topic     :: binary(),
       Partition :: integer().
 segments(Topic, Partition) ->
-    {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
-    TopicPartitionDir = filename:join(LogDir ++ atom_to_list(node()), [binary_to_list(Topic), "-", integer_to_list(Partition)]),
-    case filelib:wildcard(filename:join(TopicPartitionDir, "*.log")) of
+    TopicDir = vg_utils:topic_dir(Topic, Partition),
+    case filelib:wildcard(filename:join(TopicDir, "*.log")) of
         [] ->
             [log_segment_childspec(Topic, Partition, 0)];
         LogSegments ->
@@ -80,5 +79,5 @@ segments(Topic, Partition) ->
 log_segment_childspec(Topic, Partition, LogSegment) ->
     #{id      => {Topic, Partition, LogSegment},
       start   => {vg_log_segment, start_link, [Topic, Partition, LogSegment]},
-      restart => permanent,
+      restart => transient,
       type    => worker}.

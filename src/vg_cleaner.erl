@@ -27,13 +27,12 @@ run_cleaner(Topic, Partition) ->
     gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, run_cleaner).
 
 init([Topic, Partition]) ->
-    {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
     {ok, RetentionCheckMin} = application:get_env(vonnegut, log_retention_check_interval),
     {ok, RetentionMinutes} = application:get_env(vonnegut, log_retention_minutes),
     RetentionCheckMs = round(timer:minutes(RetentionCheckMin)),
     RetentionSeconds = RetentionMinutes * 60,
 
-    TopicDir = filename:join(LogDir, <<Topic/binary, "-", (ec_cnv:to_binary(Partition))/binary>>),
+    TopicDir = vg_utils:topic_dir(Topic, Partition),
     {ok, TRef} = timer:send_after(RetentionCheckMs, run_cleaner),
     {ok, #state{topic_dir=TopicDir,
                 topic=Topic,

@@ -16,15 +16,10 @@ write(Topic, MessageSet) when is_list(MessageSet) ->
 get(Topic) ->
     ?MODULE:get(Topic, 0).
 
-
 get(Topic, MessageId) ->
     Partition = 0,
     {SegmentId, Position} = vg_utils:find_segment_offset(Topic, Partition, MessageId),
-
-    {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
-    LogDir1 =  LogDir ++ atom_to_list(node()),
-    TopicDir = filename:join(LogDir1, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
-    File = vg_utils:log_file(TopicDir, SegmentId),
+    File = vg_utils:log_file(Topic, Partition, SegmentId),
     Size = filelib:file_size(File),
     {ok, Fd} = file:open(File, [read, binary, raw]),
     {ok, [Data]} = file:pread(Fd, [{Position, Size}]),

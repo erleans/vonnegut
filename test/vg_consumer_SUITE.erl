@@ -21,12 +21,11 @@ init_per_testcase(_, Config) ->
 end_per_testcase(_, Config) ->
     Config.
 
-from_zero(Config) ->
-    PrivDir = ?config(priv_dir, Config),
+from_zero(_Config) ->
     %% Topic = vg_test_utils:create_random_name(<<"test_topic">>),
     Topic = <<"test_topic">>,
-    TopicPartition = <<Topic/binary, "-0">>,
-    TopicPartitionDir = binary_to_list(filename:join([PrivDir, "data" ++ atom_to_list(node()), TopicPartition])),
+    Partition = 0,
+    TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
     ok = vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
