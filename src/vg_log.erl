@@ -41,8 +41,8 @@ start_link(Topic, Partition, NextBrick) ->
 write(Topic, Partition, MessageSet) ->
     gen_server:call(?SERVER(Topic, Partition), {write, MessageSet}).
 
-update_next_brick(Topic, Partition, NextBrick) ->
-    gen_server:call(?SERVER(Topic, Partition), {update_next_brick, NextBrick}).
+%% update_next_brick(Topic, Partition, NextBrick) ->
+%%     gen_server:call(?SERVER(Topic, Partition), {update_next_brick, NextBrick}).
 
 init([Topic, Partition, NextBrick]) ->
     Config = setup_config(),
@@ -200,7 +200,7 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
         {ok, Index} ->
             try
                 case file:pread(Index, {eof, 6}, 6) of
-                    <<Offset:24/signed, Position:24/signed>> ->
+                    {ok, <<Offset:24/signed, Position:24/signed>>} ->
                         {Offset, Position};
                     _ ->
                         {0, 0}

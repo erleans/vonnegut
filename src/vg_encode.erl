@@ -10,7 +10,7 @@
 -spec message(Id, Values) -> EncodedLog when
       Id :: integer(),
       Values :: binary() | {binary(), binary()},
-      EncodedLog :: iolist().
+      EncodedLog :: {pos_integer(), pos_integer(), iolist()}.
 message(Id, KeyValue) ->
     KV = encode_kv(KeyValue),
     CRC = erlang:crc32(KV),
@@ -30,6 +30,6 @@ decode(Messages) ->
 
 decode(<<>>, Acc) ->
     Acc;
-decode(<<_Id:64/signed, MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
+decode(<<_Id:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
          -1:32/signed, ValueSize:32/signed, KV:ValueSize/binary, Rest1/binary>>, Acc) ->
     decode(Rest1, [KV | Acc]).

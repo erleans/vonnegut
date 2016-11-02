@@ -39,8 +39,10 @@ init([]) ->
     %%           permanent, 20000, worker, [vg_chains]},
     TopicServer = {vg_topics, {vg_topics, start_link, []},
                    permanent, 20000, worker, [vg_topics]},
+    PoolSup = {vg_pool_sup, {vg_pool_sup, start_link, []},
+               permanent, 20000, supervisor, [vg_pool_sup]},
 
-    {ok, {{one_for_one, 10, 30}, [TopicServer | Topics]}}.
+    {ok, {{one_for_one, 10, 30}, [PoolSup, TopicServer | Topics]}}.
 
 %%====================================================================
 %% Internal functions

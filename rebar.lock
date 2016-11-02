@@ -1,5 +1,6 @@
 {"1.1.0",
-[{<<"cf">>,{pkg,<<"cf">>,<<"0.2.1">>},1},
+[{<<"acceptor_pool">>,{pkg,<<"acceptor_pool">>,<<"1.0.0-rc.0">>},0},
+ {<<"cf">>,{pkg,<<"cf">>,<<"0.2.1">>},1},
  {<<"erlware_commons">>,{pkg,<<"erlware_commons">>,<<"0.21.0">>},0},
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.8">>},1},
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.6.1">>},0},
@@ -11,6 +12,7 @@
   1}]}.
 [
 {pkg_hash,[
+ {<<"acceptor_pool">>, <<"679D741DF87FC13599B1AEF2DF8F78F1F880449A6BEFAB7C44FB6FAE0E92A2DE">>},
  {<<"cf">>, <<"69D0B1349FD4D7D4DC55B7F407D29D7A840BF9A1EF5AF529F1EBE0CE153FC2AB">>},
  {<<"erlware_commons">>, <<"A04433071AD7D112EDEFC75AC77719DD3E6753E697AC09428FC83D7564B80B15">>},
  {<<"goldrush">>, <<"2024BA375CEEA47E27EA70E14D2C483B2D8610101B4E852EF7F89163CDB6E649">>},

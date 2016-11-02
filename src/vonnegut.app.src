@@ -9,6 +9,7 @@
     lager,
     gproc,
     teleport,
+    acceptor_pool,
     erlware_commons,
     hash_ring
    ]},

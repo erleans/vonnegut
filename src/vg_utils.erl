@@ -44,7 +44,7 @@ find_active_segment(Topic, Partition) ->
             lists:max(Matches)
     end.
 
--spec find_segment_offset(Topic, Partition, MessageId) -> integer() when
+-spec find_segment_offset(Topic, Partition, MessageId) -> {integer(), integer()} when
       Topic     :: binary(),
       Partition :: integer(),
       MessageId :: integer().
