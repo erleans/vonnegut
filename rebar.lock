@@ -4,12 +4,16 @@
  {<<"erlware_commons">>,{pkg,<<"erlware_commons">>,<<"0.21.0">>},0},
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.8">>},1},
  {<<"gproc">>,{pkg,<<"gproc">>,<<"0.6.1">>},0},
+ {<<"granderl">>,
+  {git,"https://github.com/tokenrove/granderl",
+       {ref,"6aa178dfb0097c3bfb5de196a45847323ab6729f"}},
+  1},
  {<<"hash_ring">>,{pkg,<<"hash_ring">>,<<"0.4.0">>},0},
  {<<"lager">>,{pkg,<<"lager">>,<<"3.2.1">>},0},
  {<<"shackle">>,
   {git,"https://github.com/lpgauth/shackle.git",
-       {ref,"c11ce71fbf971b7b3bdf8f6784c57108f682cd7d"}},
-  1}]}.
+       {ref,"14c50629f285f25991ba4fb91177838701a7b815"}},
+  0}]}.
 [
 {pkg_hash,[
  {<<"acceptor_pool">>, <<"679D741DF87FC13599B1AEF2DF8F78F1F880449A6BEFAB7C44FB6FAE0E92A2DE">>},

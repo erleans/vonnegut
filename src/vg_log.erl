@@ -103,7 +103,7 @@ code_change(_, State, _) ->
 write_message_set(MessageSet, State) ->
     lists:foldl(fun(Message, StateAcc=#state{id=Id,
                                              byte_count=ByteCount}) ->
-                        {NextId, Size, Bytes} = vg_encode:message(Id, Message),
+                        {NextId, Size, Bytes} = vg_protocol:encode_message(Id, Message),
                         StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
                         update_log(Bytes, StateAcc1),
                         StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},

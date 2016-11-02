@@ -24,4 +24,4 @@ get(Topic, MessageId) ->
     {ok, Fd} = file:open(File, [read, binary, raw]),
     {ok, [Data]} = file:pread(Fd, [{Position, Size}]),
     file:close(Fd),
-    vg_encode:decode(Data).
+    vg_protocol:decode(Data).

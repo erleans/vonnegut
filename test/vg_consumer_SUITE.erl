@@ -33,29 +33,16 @@ from_zero(_Config) ->
                      crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
                      crypto:strong_rand_bytes(60)]),
 
-    %% replica_id max_wait_time min_bytes [topics]
-    %% topic [partitions]
-    %% partition fetch_offset max_bytes
-
-    %% ReplicaId:32/signed, MaxWaitTime:32/signed, MinBytes:32/signed, Topics/binary
-
-    %% api_key api_version correlation_id client_id
-    Header = <<1:16/signed, 1:16/signed, 1:32/signed, 9:32/signed, "ci_client">>,
-
-    Partitions = <<0:32/signed, 0:64/signed, 100:32/signed>>,
-    Topics = <<10:32/signed, "test_topic", 1:32/signed, Partitions/binary>>,
-    FetchReq = <<Header/binary, -1:32/signed, 1:32/signed, 100:32/signed, 1:32/signed, Topics/binary>>,
-    Size = byte_size(FetchReq),
-
-    Req = <<Size:32/signed, FetchReq/binary>>,
-
-    {ok, Sock} = gen_tcp:connect("127.0.0.1", 5555, [binary]),
-    ok = gen_tcp:send(Sock, Req),
-    ok = inet:setopts(Sock, [{active, once}]),
-    receive
-        {tcp, Sock, Data} ->
-            ct:pal("D ~p~n", [Data])
-    end,
-    ok = gen_tcp:close(Sock),
-
+    SocketOpts = [binary,
+                  {send_timeout, 5000},
+                  {send_timeout_close, true}],
+    shackle_pool:start(vg_client_pool, vg_client, [{ip, "127.0.0.1"},
+                                                   {port, 5555},
+                                                   {reconnect, true},
+                                                   {reconnect_time_max, 120000},
+                                                   {reconnect_time_min, none},
+                                                   {socket_options, SocketOpts}], [{backlog_size, 1024},
+                                                                                   {pool_size, 2},
+                                                                                   {pool_strategy, random}]),
+    Data = shackle:call(vg_client_pool, {fetch, <<"test_topic">>, 0}),
     ok.

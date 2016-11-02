@@ -18,7 +18,7 @@
          code_change/3,
          terminate/2]).
 
--define(FETCH_REQUEST, 1).
+-include("vg.hrl").
 
 -type topic_partition() :: {binary(), [partition()]}.
 -type partition() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
@@ -81,6 +81,7 @@ terminate(_, _) ->
 %% else return the data to be kept in the buffer
 -spec handle_data(binary(), inets:socket()) -> binary().
 handle_data(<<Size:32/signed, Message:Size/binary, Rest/binary>>, Socket) ->
+    ct:pal("Size ~p", [Size]),
     handle_request(Message, Socket),
     Rest;
 handle_data(Data, _Socket) ->
