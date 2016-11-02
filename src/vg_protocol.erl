@@ -5,7 +5,8 @@
          encode_message/2,
          encode_string/1,
          encode_bytes/1,
-         decode/1]).
+         decode_fetch/1,
+         decode_topics/1]).
 
 -include("vg.hrl").
 
@@ -54,13 +55,27 @@ encode_kv({Key, Value}) ->
 encode_kv(Value) ->
     <<-1:32/signed, (erlang:byte_size(Value)):32/signed, Value/binary>>.
 
-decode(eof) ->
-    [];
-decode(Messages) ->
-    decode(Messages, []).
+decode_fetch(<<4:32/signed, _CorrelationId:32/signed>>) ->
+    more;
+decode_fetch(<<4:32/signed, CorrelationId:32/signed, Topics/binary>>) ->
+    case decode_topics(Topics) of
+        more ->
+            more;
+        Decoded ->
+            {CorrelationId, Decoded}
+    end;
+decode_fetch(_) ->
+    more.
 
-decode(<<>>, Acc) ->
+decode_topics(eof) ->
+    [];
+decode_topics(Messages) ->
+    decode_topics(Messages, []).
+
+decode_topics(<<>>, Acc) ->
     Acc;
-decode(<<_Id:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
+decode_topics(<<_Id:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
          -1:32/signed, ValueSize:32/signed, KV:ValueSize/binary, Rest1/binary>>, Acc) ->
-    decode(Rest1, [KV | Acc]).
+    decode_topics(Rest1, [KV | Acc]);
+decode_topics(_Data, []) ->
+    more.

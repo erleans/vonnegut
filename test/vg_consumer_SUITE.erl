@@ -29,11 +29,12 @@ from_zero(_Config) ->
     ok = vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
-    vg:write(Topic, [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
-                     crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
-                     crypto:strong_rand_bytes(60)]),
+    vg:write(Topic, [<<"message 1">>, <<"message 2">>]),
 
     SocketOpts = [binary,
+                  {buffer, 65535},
+                  {nodelay, true},
+                  {packet, raw},
                   {send_timeout, 5000},
                   {send_timeout_close, true}],
     shackle_pool:start(vg_client_pool, vg_client, [{ip, "127.0.0.1"},
@@ -45,4 +46,5 @@ from_zero(_Config) ->
                                                                                    {pool_size, 2},
                                                                                    {pool_strategy, random}]),
     Data = shackle:call(vg_client_pool, {fetch, <<"test_topic">>, 0}),
+    ?assertEqual([<<"message 2">>, <<"message 1">>], Data),
     ok.

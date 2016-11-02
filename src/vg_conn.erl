@@ -53,7 +53,7 @@ handle_cast(Req, State) ->
 
 handle_info({tcp, Socket, Data}, State=#state{socket=Socket,
                                               buffer=Buffer}) ->
-    NewBuffer = handle_data(<<Buffer/binary, Data/binary>>, Socket),
+    NewBuffer = handle_request(<<Buffer/binary, Data/binary>>, Socket),
     ok = inet:setopts(Socket, [{active, once}]),
     {noreply, State#state{buffer=NewBuffer}};
 handle_info({tcp_error, Socket, Reason}, State=#state{socket=Socket}) ->
@@ -77,32 +77,22 @@ terminate(_, _) ->
 
 %% internal
 
-%% If a message can be fully read from the data then handle the request
-%% else return the data to be kept in the buffer
--spec handle_data(binary(), inets:socket()) -> binary().
-handle_data(<<Size:32/signed, Message:Size/binary, Rest/binary>>, Socket) ->
-    ct:pal("Size ~p", [Size]),
-    handle_request(Message, Socket),
-    Rest;
-handle_data(Data, _Socket) ->
-    Data.
-
 %% Parse out the type of request (apikey) and the request data
-handle_request(<<ApiKey:16/signed, _ApiVersion:16/signed, _CorrelationId:32/signed,
+handle_request(<<ApiKey:16/signed, _ApiVersion:16/signed, CorrelationId:32/signed,
                  ClientIdSize:32/signed, _ClientId:ClientIdSize/binary, Request/binary>>, Socket) ->
-    More = handle_request(ApiKey, Request, Socket),
-    ok = inet:setopts(Socket, [{active, once}]),
+    More = handle_request(ApiKey, Request, CorrelationId, Socket),
     More.
 
 handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
-                                 _MinBytes:32/signed, NumTopics:32/signed, TopicsRaw/binary>>, Socket) ->
+                                 _MinBytes:32/signed, NumTopics:32/signed, TopicsRaw/binary>>, CorrelationId, Socket) ->
     {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], Rest} = parse_topics(NumTopics, TopicsRaw),
     {SegmentId, Position} = vg_utils:find_segment_offset(Topic, Partition, Offset),
 
     File = vg_utils:log_file(Topic, Partition, SegmentId),
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
-        {ok, _} = file:sendfile(Fd, Socket, Position, 0, []),
+        gen_tcp:send(Socket, <<CorrelationId:32/signed>>),
+        {ok, B} = file:sendfile(Fd, Socket, Position, 0, []),
         Rest
     after
         file:close(Fd)

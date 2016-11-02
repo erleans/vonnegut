@@ -13,7 +13,8 @@
 -include("vg.hrl").
 
 -record(state, {
-          request_counter = 0 :: non_neg_integer()
+          request_counter = 0    :: non_neg_integer(),
+          buffer          = <<>> :: binary()
          }).
 
 -spec init() -> {ok, term()}.
@@ -30,20 +31,23 @@ handle_request({fetch, Topic, Partition}, #state {
     } = State) ->
 
     RequestId = request_id(RequestCounter),
-
     ReplicaId = -1,
     MaxWaitTime = 5000,
     MinBytes = 100,
     Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{Partition, 0, 100}]}]),
     Data = vg_protocol:encode_request(?FETCH_REQUEST, RequestId, ?CLIENT_ID, Request),
-    Size = iolist_size(Data),
 
-    {ok, RequestId, [<<Size:32/signed>>, Data], State#state{request_counter = RequestCounter + 1}}.
+    {ok, RequestId, [<<(iolist_size(Data)):32/signed>>, Data], State#state{request_counter = RequestCounter + 1}}.
 
 -spec handle_data(binary(), term()) -> {ok, term(), term()}.
-handle_data(Data, State) ->
-    ct:pal("Data ~p", [Data]),
-    {ok, Data, State}.
+handle_data(Data, State=#state{buffer=Buffer}) ->
+    Data2 = <<Buffer/binary, Data/binary>>,
+    case vg_protocol:decode_fetch(Data2) of
+        more ->
+            {ok, [], State#state{buffer = <<Buffer/binary, Data/binary>>}};
+        Result ->
+            {ok, [Result], State#state{buffer = <<>>}}
+    end.
 
 -spec terminate(term()) -> ok.
 terminate(_State) ->
