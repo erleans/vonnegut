@@ -12,7 +12,7 @@
 command(_State) ->
     frequency(
       [{1, {call, vg, write, [oneof(?TOPICS), binary()]}},
-       {5, {call, vg, get, [oneof(?TOPICS)]}}
+       {5, {call, vg, fetch, [oneof(?TOPICS)]}}
       ]).
 
 %% Initial model value at system start. Should be deterministic.
@@ -21,9 +21,9 @@ initial_state() ->
     ok = vg:create_topic(<<"topic1">>),
     ok = vg:create_topic(<<"topic2">>),
     ok = vg:create_topic(<<"topic3">>),
-    #state{topics = #{<<"topic1">> => vg:get(<<"topic1">>),
-                      <<"topic2">> => vg:get(<<"topic2">>),
-                      <<"topic3">> => vg:get(<<"topic3">>)}}.
+    #state{topics = #{<<"topic1">> => vg:fetch(<<"topic1">>),
+                      <<"topic2">> => vg:fetch(<<"topic2">>),
+                      <<"topic3">> => vg:fetch(<<"topic3">>)}}.
 
 %% Picks whether a command should be valid under the current state.
 precondition(#state{}, {call, _Mod, _Fun, _Args}) ->
