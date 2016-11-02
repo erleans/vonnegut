@@ -55,15 +55,9 @@ encode_kv({Key, Value}) ->
 encode_kv(Value) ->
     <<-1:32/signed, (erlang:byte_size(Value)):32/signed, Value/binary>>.
 
-decode_fetch(<<4:32/signed, _CorrelationId:32/signed>>) ->
-    more;
-decode_fetch(<<4:32/signed, CorrelationId:32/signed, Topics/binary>>) ->
-    case decode_topics(Topics) of
-        more ->
-            more;
-        Decoded ->
-            {CorrelationId, Decoded}
-    end;
+decode_fetch(<<Size:32/signed, Message:Size/binary, Rest/binary>>) ->
+    <<CorrelationId:32/signed, Topics/binary>> = Message,
+    {{CorrelationId, decode_topics(Topics)}, Rest};
 decode_fetch(_) ->
     more.
 

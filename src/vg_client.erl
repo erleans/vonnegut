@@ -2,13 +2,11 @@
 
 -behavior(shackle_client).
 
--export([
-    init/0,
-    setup/2,
-    handle_request/2,
-    handle_data/2,
-    terminate/1
-]).
+-export([init/0,
+         setup/2,
+         handle_request/2,
+         handle_data/2,
+         terminate/1]).
 
 -include("vg.hrl").
 
@@ -45,8 +43,8 @@ handle_data(Data, State=#state{buffer=Buffer}) ->
     case vg_protocol:decode_fetch(Data2) of
         more ->
             {ok, [], State#state{buffer = <<Buffer/binary, Data/binary>>}};
-        Result ->
-            {ok, [Result], State#state{buffer = <<>>}}
+        {Result, Rest} ->
+            {ok, [Result], State#state{buffer = Rest}}
     end.
 
 -spec terminate(term()) -> ok.
