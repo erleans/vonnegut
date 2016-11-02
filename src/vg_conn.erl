@@ -100,9 +100,9 @@ handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
     File = vg_utils:log_file(Topic, Partition, SegmentId),
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
-        Size = 4 + filelib:file_size(File) - Position,
-        gen_tcp:send(Socket, <<Size:32/signed, CorrelationId:32/signed>>),
-        {ok, B} = file:sendfile(Fd, Socket, Position, 0, []),
+        Bytes = filelib:file_size(File) - Position,
+        gen_tcp:send(Socket, <<(Bytes + 4):32/signed, CorrelationId:32/signed>>),
+        {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, []),
         Rest
     after
         file:close(Fd)
