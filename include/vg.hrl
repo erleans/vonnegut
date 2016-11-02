@@ -5,4 +5,5 @@
 -define(ATTRIBUTES, 0).
 -define(API_VERSION, 1).
 
+-define(PRODUCE_REQUEST, 0).
 -define(FETCH_REQUEST, 1).

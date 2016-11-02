@@ -28,9 +28,10 @@ from_zero(_Config) ->
     ok = vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
-    vg:write(Topic, [<<"message 1">>, <<"message 2">>]),
-
     vg_client_pool:start(),
+    ok = shackle:call(vg_client_pool, {produce, Topic, 0, <<"message 1">>}),
+    ok = shackle:call(vg_client_pool, {produce, Topic, 0, <<"message 2">>}),
+
     Data = shackle:call(vg_client_pool, {fetch, Topic, 0}),
     ?assertEqual([<<"message 2">>, <<"message 1">>], Data),
     ok.

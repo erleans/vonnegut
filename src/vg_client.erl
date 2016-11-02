@@ -12,6 +12,7 @@
 
 -record(state, {
           request_counter = 0    :: non_neg_integer(),
+          corids          = #{}  :: maps:map(),
           buffer          = <<>> :: binary()
          }).
 
@@ -25,8 +26,9 @@ setup(_Socket, State) ->
 
 -spec handle_request(term(), term()) -> {ok, non_neg_integer(), iodata(), term()}.
 handle_request({fetch, Topic, Partition}, #state {
-        request_counter = RequestCounter
-    } = State) ->
+                 request_counter = RequestCounter,
+                 corids = CorIds
+                } = State) ->
 
     RequestId = request_id(RequestCounter),
     ReplicaId = -1,
@@ -35,16 +37,35 @@ handle_request({fetch, Topic, Partition}, #state {
     Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{Partition, 0, 100}]}]),
     Data = vg_protocol:encode_request(?FETCH_REQUEST, RequestId, ?CLIENT_ID, Request),
 
-    {ok, RequestId, [<<(iolist_size(Data)):32/signed>>, Data], State#state{request_counter = RequestCounter + 1}}.
+    {ok, RequestId, [<<(iolist_size(Data)):32/signed>>, Data],
+     State#state{corids = maps:put(RequestId, ?FETCH_REQUEST, CorIds),
+                 request_counter = RequestCounter + 1}};
+handle_request({produce, Topic, Partition, Records}, #state {
+                 request_counter = RequestCounter,
+                 corids = CorIds
+                } = State) ->
+
+    RequestId = request_id(RequestCounter),
+    Acks = 0,
+    Timeout = 5000,
+    TopicData = [{Topic, [{Partition, Records}]}],
+    Request = vg_protocol:encode_produce(Acks, Timeout, TopicData),
+    Data = vg_protocol:encode_request(?PRODUCE_REQUEST, RequestId, ?CLIENT_ID, Request),
+
+    {ok, RequestId, [<<(iolist_size(Data)):32/signed>>, Data],
+     State#state{corids = maps:put(RequestId, ?PRODUCE_REQUEST, CorIds),
+                 request_counter = RequestCounter + 1}}.
 
 -spec handle_data(binary(), term()) -> {ok, term(), term()}.
-handle_data(Data, State=#state{buffer=Buffer}) ->
+handle_data(Data, State=#state{buffer=Buffer,
+                               corids=CorIds}) ->
     Data2 = <<Buffer/binary, Data/binary>>,
-    case vg_protocol:decode_fetch(Data2) of
+    case vg_protocol:decode_response(Data2) of
         more ->
             {ok, [], State#state{buffer = <<Buffer/binary, Data/binary>>}};
-        {Result, Rest} ->
-            {ok, [Result], State#state{buffer = Rest}}
+        {CorrelationId, Response, Rest} ->
+            Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
+            {ok, [{CorrelationId, Result}], State#state{buffer = Rest}}
     end.
 
 -spec terminate(term()) -> ok.

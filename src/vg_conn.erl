@@ -106,7 +106,12 @@ handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
         Rest
     after
         file:close(Fd)
-    end.
+    end;
+handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
+    {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
+    [vg_log:write(Topic, Partition, [MessageSet]) || {Topic, [{Partition, MessageSet} | _]} <- TopicData],
+    gen_tcp:send(Socket, <<8:32/signed, CorrelationId:32/signed, 1:32/signed>>),
+    <<>>.
 
 -spec parse_topics(non_neg_integer(), binary()) -> {[topic_partition()], binary()}.
 parse_topics(Num, Raw) ->

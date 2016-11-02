@@ -1,17 +1,53 @@
 -module(vg_protocol).
 
 -export([encode_fetch/4,
+         encode_produce/3,
          encode_request/4,
          encode_message/2,
          encode_string/1,
          encode_bytes/1,
-         decode_fetch/1,
-         decode_topics/1]).
+
+         decode_produce_request/1,
+         decode_fetch_response/1,
+         decode_response/1,
+         decode_response/2]).
 
 -include("vg.hrl").
 
 encode_fetch(ReplicaId, MaxWaitTime, MinBytes, Topics) ->
     [<<ReplicaId:32/signed, MaxWaitTime:32/signed, MinBytes:32/signed>>, encode_topics(Topics)].
+
+encode_produce(Acks, Timeout, TopicData) when Acks =:= -1
+                                            ; Acks =:= 0
+                                            ; Acks =:= 1 ->
+    [<<Acks:16/signed, Timeout:32/signed>>, encode_topic_data(TopicData)].
+
+encode_topic_data(TopicData) ->
+    encode_array([[encode_string(Topic), encode_data(Data)] || {Topic, Data} <- TopicData]).
+
+encode_data(Data) ->
+    encode_array([[<<Partition:32/signed>>, encode_bytes(RecordSet)] || {Partition, RecordSet} <- Data]).
+
+decode_produce_request(<<Acks:16/signed, Timeout:32/signed, Topics/binary>>) ->
+    {TopicsDecode, _} = decode_produce_topics_request(Topics),
+    {Acks, Timeout, TopicsDecode}.
+
+decode_produce_topics_request(<<Length:32/signed, Rest/binary>>) ->
+    decode_produce_topics_request(Length, Rest, []).
+
+decode_produce_topics_request(0, Rest, Acc) ->
+    {Acc, Rest};
+decode_produce_topics_request(N, <<Size:32/signed, Topic:Size/binary, Rest/binary>>, Acc) ->
+    {TopicData, Rest1} = decode_produce_partitions_request(Rest),
+    decode_produce_topics_request(N-1, Rest1, [{Topic, TopicData} | Acc]).
+
+decode_produce_partitions_request(<<Length:32/signed, Rest/binary>>) ->
+    decode_produce_partitions_request(Length, Rest, []).
+
+decode_produce_partitions_request(0, Rest, Acc) ->
+    {Acc, Rest};
+decode_produce_partitions_request(N, <<Partition:32/signed, Size:32/signed, RecordSet:Size/binary, Rest/binary>>, Acc) ->
+    decode_produce_partitions_request(N - 1, Rest, [{Partition, RecordSet} | Acc]).
 
 encode_topics(Topics) ->
     encode_array([[encode_string(Topic), encode_partitions(Partitions)] || {Topic, Partitions} <- Topics]).
@@ -55,21 +91,29 @@ encode_kv({Key, Value}) ->
 encode_kv(Value) ->
     <<-1:32/signed, (erlang:byte_size(Value)):32/signed, Value/binary>>.
 
-decode_fetch(<<Size:32/signed, Message:Size/binary, Rest/binary>>) ->
-    <<CorrelationId:32/signed, Topics/binary>> = Message,
-    {{CorrelationId, decode_topics(Topics)}, Rest};
-decode_fetch(_) ->
+decode_response(<<Size:32/signed, Message:Size/binary, Rest/binary>>) ->
+    <<CorrelationId:32/signed, Response/binary>> = Message,
+    {CorrelationId, Response, Rest};
+decode_response(_) ->
     more.
 
-decode_topics(eof) ->
-    [];
-decode_topics(Messages) ->
-    decode_topics(Messages, []).
+decode_response(?FETCH_REQUEST, Response) ->
+    decode_fetch_response(Response);
+decode_response(?PRODUCE_REQUEST, Response) ->
+    decode_produce_response(Response).
 
-decode_topics(<<>>, Acc) ->
+decode_produce_response(<<1:32/signed>>) ->
+    ok.
+
+decode_fetch_response(eof) ->
+    [];
+decode_fetch_response(Messages) ->
+    decode_fetch_response(Messages, []).
+
+decode_fetch_response(<<>>, Acc) ->
     Acc;
-decode_topics(<<_Id:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
-         -1:32/signed, ValueSize:32/signed, KV:ValueSize/binary, Rest1/binary>>, Acc) ->
-    decode_topics(Rest1, [KV | Acc]);
-decode_topics(_Data, []) ->
+decode_fetch_response(<<_Id:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
+                -1:32/signed, ValueSize:32/signed, KV:ValueSize/binary, Rest1/binary>>, Acc) ->
+    decode_fetch_response(Rest1, [KV | Acc]);
+decode_fetch_response(_Data, []) ->
     more.
