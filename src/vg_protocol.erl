@@ -120,13 +120,10 @@ decode_array(DecodeFun, N, Rest, Acc) ->
     decode_array(DecodeFun, N-1, Rest1, [Element | Acc]).
 
 
-decode_record_set(RecordSet) ->
-    decode_record_set(RecordSet, []).
-
-decode_record_set(<<>>, Acc) ->
-    Acc;
-decode_record_set(<<?OFFSET:64, Size:32/signed, Record:Size/binary, Rest/binary>>, Acc) ->
-    decode_record_set(Rest, [decode_record(Record) | Acc]).
+decode_record_set(<<>>) ->
+    [];
+decode_record_set(<<?OFFSET:64, Size:32/signed, Record:Size/binary, Rest/binary>>) ->
+    [decode_record(Record) | decode_record_set(Rest)].
 
 decode_record(<<_CRC:32/signed, ?API_VERSION:8, _Compression:8, -1:32/signed, Size:32/signed, Data:Size/binary>>) ->
     Data.
@@ -170,13 +167,10 @@ decode_produce_response_partitions(<<Partition:32/signed, ErrorCode:16/signed, O
 
 decode_fetch_response(eof) ->
     [];
-decode_fetch_response(Messages) ->
-    decode_fetch_response(Messages, []).
-
-decode_fetch_response(<<>>, Acc) ->
-    Acc;
+decode_fetch_response(<<>>) ->
+    [];
 decode_fetch_response(<<_Id:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
-                -1:32/signed, ValueSize:32/signed, KV:ValueSize/binary, Rest1/binary>>, Acc) ->
-    decode_fetch_response(Rest1, [KV | Acc]);
-decode_fetch_response(_Data, []) ->
+                        -1:32/signed, ValueSize:32/signed, KV:ValueSize/binary, Rest1/binary>>) ->
+    [KV | decode_fetch_response(Rest1)];
+decode_fetch_response(_Data) ->
     more.

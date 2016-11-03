@@ -29,9 +29,8 @@ from_zero(_Config) ->
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
     vg_client_pool:start(),
-    ?assertEqual([{Topic,[{0,0,1}]}], shackle:call(vg_client_pool, {produce, Topic, 0, <<"message 1">>})),
-    ?assertEqual([{Topic,[{0,0,2}]}], shackle:call(vg_client_pool, {produce, Topic, 0, <<"message 2">>})),
+    ?assertEqual([{Topic,[{0,0,2}]}], shackle:call(vg_client_pool, {produce, Topic, 0, [<<"message 1">>, <<"message 2">>]})),
 
     Data = shackle:call(vg_client_pool, {fetch, Topic, 0}),
-    ?assertEqual([<<"message 2">>, <<"message 1">>], Data),
+    ?assertEqual([<<"message 1">>, <<"message 2">>], Data),
     ok.
