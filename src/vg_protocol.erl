@@ -6,6 +6,7 @@
          encode_message/2,
          encode_string/1,
          encode_bytes/1,
+         encode_produce_response/1,
 
          decode_array/2,
 
@@ -72,6 +73,18 @@ encode_kv({Key, Value}) ->
 encode_kv(Value) ->
     <<-1:32/signed, (erlang:byte_size(Value)):32/signed, Value/binary>>.
 
+encode_produce_response(TopicPartitions) ->
+    encode_produce_response(TopicPartitions, []).
+
+encode_produce_response([], Acc) ->
+    encode_array(Acc);
+encode_produce_response([{Topic, Partitions} | T], Acc) ->
+    encode_produce_response(T, [[encode_string(Topic), encode_produce_response_partitions(Partitions)] | Acc]).
+
+encode_produce_response_partitions(Partitions) ->
+    encode_array([<<Partition:32/signed, ErrorCode:16/signed, Offset:64/signed>>
+                     || {Partition, ErrorCode, Offset} <- Partitions]).
+
 %% decode generic functions
 
 decode_array(DecodeFun, <<Length:32/signed, Rest/binary>>) ->
@@ -109,8 +122,16 @@ decode_response(?FETCH_REQUEST, Response) ->
 decode_response(?PRODUCE_REQUEST, Response) ->
     decode_produce_response(Response).
 
-decode_produce_response(<<1:32/signed>>) ->
-    ok.
+decode_produce_response(Response) ->
+    {TopicResults, _}= decode_array(fun decode_produce_response_topics/1, Response),
+    TopicResults.
+
+decode_produce_response_topics(<<Size:32/signed, Topic:Size/binary, PartitionsRaw/binary>>) ->
+    {Partitions, Rest} = decode_array(fun decode_produce_response_partitions/1, PartitionsRaw),
+    {{Topic, Partitions}, Rest}.
+
+decode_produce_response_partitions(<<Partition:32/signed, ErrorCode:16/signed, Offset:64/signed, Rest/binary>>) ->
+    {{Partition, ErrorCode, Offset}, Rest}.
 
 decode_fetch_response(eof) ->
     [];

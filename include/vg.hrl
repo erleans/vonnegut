@@ -7,3 +7,5 @@
 
 -define(PRODUCE_REQUEST, 0).
 -define(FETCH_REQUEST, 1).
+
+-define(NONE_ERROR, 0).

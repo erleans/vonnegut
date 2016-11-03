@@ -84,7 +84,7 @@ handle_call({write, MessageSet}, _From, State=#state{topic=Topic,
         _ ->
             teleport:gs_call({binary_to_atom(<<Topic/binary, Partition>>, utf8), NextBrick}, {write, MessageSet}, 5000)
     end,
-    {reply, ok, State1}.
+    {reply, {ok, State1#state.id}, State1}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.

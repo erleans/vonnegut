@@ -94,7 +94,7 @@ handle_request(<<ApiKey:16/signed, _ApiVersion:16/signed, CorrelationId:32/signe
 
 handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
                                  _MinBytes:32/signed, Rest/binary>>, CorrelationId, Socket) ->
-    {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], Rest1} = vg_protocol:decode_array(fun decode_topic/1, Rest),
+    {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
     {SegmentId, Position} = vg_utils:find_segment_offset(Topic, Partition, Offset),
 
     File = vg_utils:log_file(Topic, Partition, SegmentId),
@@ -102,16 +102,20 @@ handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
     try
         Bytes = filelib:file_size(File) - Position,
         gen_tcp:send(Socket, <<(Bytes + 4):32/signed, CorrelationId:32/signed>>),
-        {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, []),
-        Rest1
+        {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, [])
     after
         file:close(Fd)
     end;
 handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
-    [vg_log:write(Topic, Partition, [MessageSet]) || {Topic, [{Partition, MessageSet} | _]} <- TopicData],
-    gen_tcp:send(Socket, <<8:32/signed, CorrelationId:32/signed, 1:32/signed>>),
-    <<>>.
+    Results = [{Topic, [begin
+                            {ok, Offset} = vg_log:write(Topic, Partition, [MessageSet]),
+                            {Partition, ?NONE_ERROR, Offset}
+                        end || {Partition, MessageSet} <- PartitionData]}
+              || {Topic, PartitionData} <- TopicData],
+    ProduceResponse = vg_protocol:encode_produce_response(Results),
+    Size = erlang:iolist_size(ProduceResponse) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ProduceResponse]).
 
 -spec decode_topic(binary()) -> {topic_partition(), binary()}.
 decode_topic(<<Size:32/signed, Topic:Size/binary, PartitionsRaw/binary>>) ->
