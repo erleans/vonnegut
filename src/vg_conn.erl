@@ -109,7 +109,7 @@ handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
 handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
     Results = [{Topic, [begin
-                            {ok, Offset} = vg_log:write(Topic, Partition, [MessageSet]),
+                            {ok, Offset} = vg_log:write(Topic, Partition, MessageSet),
                             {Partition, ?NONE_ERROR, Offset}
                         end || {Partition, MessageSet} <- PartitionData]}
               || {Topic, PartitionData} <- TopicData],

@@ -3,6 +3,7 @@
 -export([start/0]).
 
 start() ->
+    ClientPoolSize = application:get_env(vonnegut, client_pool_size, 2),
     SocketOpts = [binary,
                   {buffer, 65535},
                   {nodelay, true},
@@ -16,5 +17,5 @@ start() ->
                                                    {reconnect_time_min, none},
                                                    {socket_options, SocketOpts}],
                        [{backlog_size, 1024},
-                        {pool_size, 2},
+                        {pool_size, ClientPoolSize},
                         {pool_strategy, random}]).

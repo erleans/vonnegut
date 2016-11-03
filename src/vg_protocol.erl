@@ -9,6 +9,7 @@
          encode_produce_response/1,
 
          decode_array/2,
+         decode_record_set/1,
 
          decode_produce_request/1,
          decode_fetch_response/1,
@@ -16,6 +17,8 @@
          decode_response/2]).
 
 -include("vg.hrl").
+
+%% encode requests
 
 encode_fetch(ReplicaId, MaxWaitTime, MinBytes, Topics) ->
     [<<ReplicaId:32/signed, MaxWaitTime:32/signed, MinBytes:32/signed>>, encode_topics(Topics)].
@@ -29,7 +32,10 @@ encode_topic_data(TopicData) ->
     encode_array([[encode_string(Topic), encode_data(Data)] || {Topic, Data} <- TopicData]).
 
 encode_data(Data) ->
-    encode_array([[<<Partition:32/signed>>, encode_bytes(RecordSet)] || {Partition, RecordSet} <- Data]).
+    encode_array([begin
+                      RecordSetEncoded = encode_record_set(RecordSet, 0),
+                      [<<Partition:32/signed, (iolist_size(RecordSetEncoded)):32>>, RecordSetEncoded]
+                  end || {Partition, RecordSet} <- Data]).
 
 encode_topics(Topics) ->
     encode_array([[encode_string(Topic), encode_partitions(Partitions)] || {Topic, Partitions} <- Topics]).
@@ -40,6 +46,8 @@ encode_partitions(Partitions) ->
 
 encode_request(ApiKey, CorrelationId, ClientId, Request) ->
     [<<ApiKey:16, ?API_VERSION:16, CorrelationId:32>>, encode_string(ClientId), Request].
+
+%% generic encode functions
 
 encode_string(undefined) ->
     <<-1:32/signed>>;
@@ -56,6 +64,19 @@ encode_bytes(undefined) ->
 encode_bytes(Data) ->
     [<<(size(Data)):32>>, Data].
 
+encode_record_set([], _Compression) ->
+    [];
+encode_record_set(Record, Compression) when is_binary(Record) ->
+    Record2 = encode_record(Record, Compression),
+    [<<?OFFSET:64, (iolist_size(Record2)):32>>, Record2];
+encode_record_set([Record | T], Compression) ->
+    Record2 = encode_record(Record, Compression),
+    [[<<?OFFSET:64, (iolist_size(Record2)):32>>, Record2], encode_record_set(T, Compression)].
+
+encode_record(Record, Compression) ->
+    Record2 = [<<?API_VERSION:8, Compression:8>>, encode_bytes(undefined), encode_bytes(Record)],
+    [<<(erlang:crc32(Record2)):32>>, Record2].
+
 %% <<Id:64, MessageSize:32, Crc:32, MagicByte:8, Attributes:8, Key/Value>>
 -spec encode_message(Id, Values) -> EncodedLog when
       Id :: integer(),
@@ -69,9 +90,11 @@ encode_message(Id, KeyValue) ->
     {Id+1, MessageSize+12, [<<Id:64/signed, MessageSize:32/signed>>, MessageIoList]}.
 
 encode_kv({Key, Value}) ->
-    [<<(erlang:byte_size(Key)):32/signed>>, Key, <<(erlang:byte_size(Value)):32/signed>>, Value];
+    [encode_bytes(Key), encode_bytes(Value)];
 encode_kv(Value) ->
-    <<-1:32/signed, (erlang:byte_size(Value)):32/signed, Value/binary>>.
+    [encode_bytes(undefined), encode_bytes(Value)].
+
+%% encode responses
 
 encode_produce_response(TopicPartitions) ->
     encode_produce_response(TopicPartitions, []).
@@ -96,6 +119,18 @@ decode_array(DecodeFun, N, Rest, Acc) ->
     {Element, Rest1} = DecodeFun(Rest),
     decode_array(DecodeFun, N-1, Rest1, [Element | Acc]).
 
+
+decode_record_set(RecordSet) ->
+    decode_record_set(RecordSet, []).
+
+decode_record_set(<<>>, Acc) ->
+    Acc;
+decode_record_set(<<?OFFSET:64, Size:32/signed, Record:Size/binary, Rest/binary>>, Acc) ->
+    decode_record_set(Rest, [decode_record(Record) | Acc]).
+
+decode_record(<<_CRC:32/signed, ?API_VERSION:8, _Compression:8, -1:32/signed, Size:32/signed, Data:Size/binary>>) ->
+    Data.
+
 %% decode requests
 
 decode_produce_request(<<Acks:16/signed, Timeout:32/signed, Topics/binary>>) ->
@@ -107,7 +142,7 @@ decode_produce_topics_request(<<Size:32/signed, Topic:Size/binary, Rest/binary>>
     {{Topic, TopicData}, Rest1}.
 
 decode_produce_partitions_request(<<Partition:32/signed, Size:32/signed, RecordSet:Size/binary, Rest/binary>>) ->
-    {{Partition, RecordSet}, Rest}.
+    {{Partition, decode_record_set(RecordSet)}, Rest}.
 
 %% decode responses
 
