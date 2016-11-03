@@ -93,8 +93,8 @@ handle_request(<<ApiKey:16/signed, _ApiVersion:16/signed, CorrelationId:32/signe
     More.
 
 handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
-                                 _MinBytes:32/signed, NumTopics:32/signed, TopicsRaw/binary>>, CorrelationId, Socket) ->
-    {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], Rest} = parse_topics(NumTopics, TopicsRaw),
+                                 _MinBytes:32/signed, Rest/binary>>, CorrelationId, Socket) ->
+    {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], Rest1} = vg_protocol:decode_array(fun decode_topic/1, Rest),
     {SegmentId, Position} = vg_utils:find_segment_offset(Topic, Partition, Offset),
 
     File = vg_utils:log_file(Topic, Partition, SegmentId),
@@ -103,7 +103,7 @@ handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
         Bytes = filelib:file_size(File) - Position,
         gen_tcp:send(Socket, <<(Bytes + 4):32/signed, CorrelationId:32/signed>>),
         {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, []),
-        Rest
+        Rest1
     after
         file:close(Fd)
     end;
@@ -113,24 +113,16 @@ handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
     gen_tcp:send(Socket, <<8:32/signed, CorrelationId:32/signed, 1:32/signed>>),
     <<>>.
 
--spec parse_topics(non_neg_integer(), binary()) -> {[topic_partition()], binary()}.
-parse_topics(Num, Raw) ->
-    parse_topics(Num, Raw, []).
+-spec decode_topic(binary()) -> {topic_partition(), binary()}.
+decode_topic(<<Size:32/signed, Topic:Size/binary, PartitionsRaw/binary>>) ->
+    {Partitions, Rest} = vg_protocol:decode_array(fun decode_partition/1, PartitionsRaw),
+    {{Topic, Partitions}, Rest}.
 
-parse_topics(0, Rest, Topics) ->
-    {Topics, Rest};
-parse_topics(Num, <<Size:32/signed, Topic:Size/binary, NumPartitions:32/signed, Rest/binary>>, Topics) ->
-    {Partitions, Rest1} = parse_partitions(NumPartitions, Rest),
-    parse_topics(Num-1, Rest1, [{Topic, Partitions} | Topics]).
+-spec decode_partition(binary()) -> {partition(), binary()}.
+decode_partition(<<Partition:32/signed, FetchOffset:64/signed, MaxBytes:32/signed, Rest/binary>>) ->
+    {{Partition, FetchOffset, MaxBytes}, Rest}.
 
--spec parse_partitions(non_neg_integer(), binary()) -> {[partition()], binary()}.
-parse_partitions(Num, Raw) ->
-    parse_partitions(Num, Raw, []).
-
-parse_partitions(0, Rest, Partitions) ->
-    {Partitions, Rest};
-parse_partitions(Num, <<Partition:32/signed, FetchOffset:64/signed, MaxBytes:32/signed, Rest/binary>>, Partitions) ->
-    parse_partitions(Num-1, Rest, [{Partition, FetchOffset, MaxBytes} | Partitions]).
+%%
 
 flush_socket(Socket) ->
     receive

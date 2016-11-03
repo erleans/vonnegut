@@ -24,4 +24,4 @@ fetch(Topic, Offset) ->
     {ok, Fd} = file:open(File, [read, binary, raw]),
     {ok, [Data]} = file:pread(Fd, [{Position, Size}]),
     file:close(Fd),
-    vg_protocol:decode_topics(Data).
+    vg_protocol:decode_fetch_response(Data).

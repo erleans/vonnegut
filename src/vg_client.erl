@@ -1,6 +1,6 @@
 -module(vg_client).
 
--behavior(shackle_client).
+%%-behavior(shackle_client). ?
 
 -export([init/0,
          setup/2,
