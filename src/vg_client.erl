@@ -29,7 +29,6 @@ handle_request({fetch, Topic, Partition}, #state {
                  request_counter = RequestCounter,
                  corids = CorIds
                 } = State) ->
-
     RequestId = request_id(RequestCounter),
     ReplicaId = -1,
     MaxWaitTime = 5000,
@@ -65,7 +64,8 @@ handle_data(Data, State=#state{buffer=Buffer,
             {ok, [], State#state{buffer = <<Buffer/binary, Data/binary>>}};
         {CorrelationId, Response, Rest} ->
             Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
-            {ok, [{CorrelationId, Result}], State#state{buffer = Rest}}
+            {ok, [{CorrelationId, Result}], State#state{corids = maps:remove(CorrelationId, CorIds),
+                                                        buffer = Rest}}
     end.
 
 -spec terminate(term()) -> ok.
