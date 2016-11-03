@@ -2,7 +2,10 @@
 
 %%-behavior(shackle_client). ?
 
--export([init/0,
+-export([fetch/1,
+         produce/2,
+
+         init/0,
          setup/2,
          handle_request/2,
          handle_data/2,
@@ -15,6 +18,12 @@
           corids          = #{}  :: maps:map(),
           buffer          = <<>> :: binary()
          }).
+
+fetch(Topic) ->
+    shackle:call(vg_client_pool, {fetch, Topic, 0}).
+
+produce(Topic, RecordSet) ->
+    shackle:call(vg_client_pool, {produce, Topic, 0, RecordSet}).
 
 -spec init() -> {ok, term()}.
 init() ->
