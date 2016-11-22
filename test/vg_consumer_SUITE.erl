@@ -28,9 +28,12 @@ from_zero(_Config) ->
     ok = vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
-    vg_client_pool:start(),
-    ?assertEqual([{Topic,[{0,0,2}]}], vg_client:produce(Topic, [<<"message 1">>, <<"message 2">>])),
+    ok = vg_client_pool:start(),
+    ?assertEqual([{Topic,[{0,0,0}]}],
+                 vg_client:produce(Topic, [<<"message 1 wasn't long enough to make wrapping fail">>,
+                                           <<"message 2">>])),
 
     Data = vg_client:fetch(Topic),
-    ?assertEqual([<<"message 1">>, <<"message 2">>], Data),
+    ?assertEqual([<<"message 1 wasn't long enough to make wrapping fail">>, <<"message 2">>], Data),
+    vg_client_pool:stop(),
     ok.

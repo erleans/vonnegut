@@ -2,7 +2,7 @@
 
 %%-behavior(shackle_client). ?
 
--export([fetch/1,
+-export([fetch/1, fetch/2,
          produce/2,
 
          init/0,
@@ -20,7 +20,10 @@
          }).
 
 fetch(Topic) ->
-    shackle:call(vg_client_pool, {fetch, Topic, 0}).
+    fetch(Topic, 0).
+
+fetch(Topic, Position) ->
+    shackle:call(vg_client_pool, {fetch, Topic, 0, Position}).
 
 produce(Topic, RecordSet) ->
     shackle:call(vg_client_pool, {produce, Topic, 0, RecordSet}).
@@ -34,7 +37,7 @@ setup(_Socket, State) ->
     {ok, State}.
 
 -spec handle_request(term(), term()) -> {ok, non_neg_integer(), iodata(), term()}.
-handle_request({fetch, Topic, Partition}, #state {
+handle_request({fetch, Topic, Partition, Position}, #state {
                  request_counter = RequestCounter,
                  corids = CorIds
                 } = State) ->
@@ -42,7 +45,7 @@ handle_request({fetch, Topic, Partition}, #state {
     ReplicaId = -1,
     MaxWaitTime = 5000,
     MinBytes = 100,
-    Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{Partition, 0, 100}]}]),
+    Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{Partition, Position, 100}]}]),
     Data = vg_protocol:encode_request(?FETCH_REQUEST, RequestId, ?CLIENT_ID, Request),
 
     {ok, RequestId, [<<(iolist_size(Data)):32/signed>>, Data],
@@ -73,6 +76,7 @@ handle_data(Data, State=#state{buffer=Buffer,
             {ok, [], State#state{buffer = <<Buffer/binary, Data/binary>>}};
         {CorrelationId, Response, Rest} ->
             Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
+            lager:debug("cli result ~p ~p", [Response, Result]),
             {ok, [{CorrelationId, Result}], State#state{corids = maps:remove(CorrelationId, CorIds),
                                                         buffer = Rest}}
     end.

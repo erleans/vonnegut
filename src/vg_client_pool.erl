@@ -1,6 +1,9 @@
 -module(vg_client_pool).
 
--export([start/0]).
+-export([
+         start/0,
+         stop/0
+        ]).
 
 start() ->
     ClientPoolSize = application:get_env(vonnegut, client_pool_size, 2),
@@ -19,3 +22,6 @@ start() ->
                        [{backlog_size, 1024},
                         {pool_size, ClientPoolSize},
                         {pool_strategy, random}]).
+
+stop() ->
+    shackle_pool:stop(vg_client_pool).

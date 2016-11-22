@@ -3,6 +3,7 @@
 -export([find_log_segment/3,
          find_active_segment/2,
          find_segment_offset/3,
+         find_segments/3,
          index_file/2,
          index_file/3,
          log_file/2,
@@ -22,9 +23,7 @@
       MessageId :: integer().
 find_log_segment(Topic, Partition, MessageId) ->
     %% Find all registered log segments for topic-partition < the messageid we are looking for
-    case gproc:select({l,n}, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
-                               ?LOG_SEGMENT_GUARD(MessageId),
-                               ?LOG_SEGMENT_RETURN}]) of
+    case find_segments(Topic, Partition, MessageId) of
         [] ->
             0;
         Matches  ->
@@ -37,15 +36,28 @@ find_log_segment(Topic, Partition, MessageId) ->
       Topic     :: binary(),
       Partition :: integer().
 find_active_segment(Topic, Partition) ->
-    %% Find all registered log segments for topic-partition < the messageid we are looking for
-    case gproc:select({l,n}, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
-                              [],
-                              ?LOG_SEGMENT_RETURN}]) of
+    case find_segments(Topic, Partition, 0) of
         [] ->
             0;
         Matches  ->
+            lager:debug("matches ~p", [Matches]),
             lists:max(Matches)
     end.
+
+-spec find_segments(Topic, Partition, Offset) -> [integer()] when
+      Topic     :: binary(),
+      Partition :: integer(),
+      Offset    :: integer().
+find_segments(Topic, Partition, Offset) ->
+    Guard =
+        case Offset of
+            %% 0 is the special request for all segments
+            0 -> [];
+            _ -> ?LOG_SEGMENT_GUARD(Offset)
+        end,
+    gproc:select({l,n}, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
+                          Guard,
+                          ?LOG_SEGMENT_RETURN}]).
 
 -spec find_segment_offset(Topic, Partition, MessageId) -> {integer(), integer()} when
       Topic     :: binary(),
