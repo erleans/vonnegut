@@ -35,18 +35,18 @@ write(Config) ->
     Topic = get_topic(Config),
     Anarchist = <<"no gods no masters">>,
     [begin
-         [{Topic, R}] = vg_client:produce(Topic, Anarchist),
+         R = vg_client:produce(Topic, Anarchist),
          ct:pal("reply: ~p", [R])
      end
      || _ <- lists:seq(1, rand:uniform(20))],
     Communist =  <<"from each according to their abilities, to "
                    "each according to their needs">>,
-    [{Topic, [{0, 0, R1}]}] = vg_client:produce(Topic, Communist),
+    #{topic := Topic, offset := R1} = vg_client:produce(Topic, Communist),
     ct:pal("reply: ~p", [R1]),
     timer:sleep(1000),
-    [Reply] = vg_client:fetch(Topic, R1),
-    ?assertEqual(Communist, Reply),
-    Reply1 = vg_client:fetch(Topic, R1 - 1),
+    #{message_set := Reply} = vg_client:fetch(Topic, R1),
+    ?assertEqual([Communist], Reply),
+    #{message_set := Reply1} = vg_client:fetch_until(Topic, R1 - 1, R1),
     ?assertEqual([Anarchist, Communist], Reply1),
     Config.
 

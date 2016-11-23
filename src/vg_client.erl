@@ -3,6 +3,7 @@
 %%-behavior(shackle_client). ?
 
 -export([fetch/1, fetch/2,
+         fetch_until/2, fetch_until/3,
          produce/2,
 
          init/0,
@@ -24,6 +25,31 @@ fetch(Topic) ->
 
 fetch(Topic, Position) ->
     shackle:call(vg_client_pool, {fetch, Topic, 0, Position}).
+
+fetch_until(Topic, Target) ->
+    fetch_until(Topic, 0, Target).
+
+fetch_until(Topic, Position, Target) ->
+    Loop =
+        fun Loop(Acc) ->
+                Resp0 = shackle:call(vg_client_pool, {fetch, Topic, 0, Position}),
+                Resp = merge_fetch_response(Acc, Resp0),
+                #{high_water_mark := Mark} = Resp,
+                case Mark >= Target of
+                    true ->
+                        Resp;
+                    _ ->
+                        Loop(Resp)
+                end
+        end,
+    Loop(#{message_set => [], high_water_mark => 0}).
+
+merge_fetch_response(One, Two) ->
+    #{message_set := Set1} = One,
+    #{message_set := Set2} = Two,
+    %% we assume ordering here, so Two's mark will be larger than
+    %% one's, and when we append we'll preserve ordering.
+    Two#{message_set := lists:append(Set1, Set2)}.
 
 produce(Topic, RecordSet) ->
     shackle:call(vg_client_pool, {produce, Topic, 0, RecordSet}).

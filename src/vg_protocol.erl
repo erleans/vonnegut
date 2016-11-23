@@ -155,8 +155,13 @@ decode_response(?PRODUCE_REQUEST, Response) ->
     decode_produce_response(Response).
 
 decode_produce_response(Response) ->
-    {TopicResults, _}= decode_array(fun decode_produce_response_topics/1, Response),
-    TopicResults.
+    {TopicResults, _Rest}= decode_array(fun decode_produce_response_topics/1, Response),
+    [{Topic, [{Partition, ErrorCode, Offset}]}] = TopicResults,
+    %% we're currently not including throttle time or timestamp
+    #{topic => Topic,
+      partition => Partition,
+      offset => Offset,
+      error_code => ErrorCode}.
 
 decode_produce_response_topics(<<Size:32/signed, Topic:Size/binary, PartitionsRaw/binary>>) ->
     {Partitions, Rest} = decode_array(fun decode_produce_response_partitions/1, PartitionsRaw),
@@ -165,12 +170,31 @@ decode_produce_response_topics(<<Size:32/signed, Topic:Size/binary, PartitionsRa
 decode_produce_response_partitions(<<Partition:32/signed, ErrorCode:16/signed, Offset:64/signed, Rest/binary>>) ->
     {{Partition, ErrorCode, Offset}, Rest}.
 
-decode_fetch_response(eof) ->
-    [];
-decode_fetch_response(<<>>) ->
-    [];
-decode_fetch_response(<<_Id:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
-                        -1:32/signed, ValueSize:32/signed, KV:ValueSize/binary, Rest1/binary>>) ->
-    [KV | decode_fetch_response(Rest1)];
-decode_fetch_response(_Data) ->
-    more.
+decode_fetch_response(Msg) ->
+    decode_fetch_response(Msg, resp_map()).
+
+decode_fetch_response(eof, Acc) ->
+    #{message_set := Set} = Acc,
+    Acc#{message_set := lists:reverse(Set)};
+decode_fetch_response(<<>>, Acc) ->
+    #{message_set := Set} = Acc,
+    Acc#{message_set := lists:reverse(Set)};
+decode_fetch_response(<<ID:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
+                        -1:32/signed, ValueSize:32/signed, KV:ValueSize/binary, Rest/binary>>, Acc) ->
+    #{message_set := Set,
+      high_water_mark := Mark} = Acc,
+    Mark1 = max(ID, Mark),
+    Set1 = [KV | Set],
+    lager:info("decode fetch ~p ~p", [ID, KV]),
+    decode_fetch_response(Rest, Acc#{message_set := Set1, high_water_mark := Mark1});
+decode_fetch_response(Data, Acc) ->
+    {more, Data, Acc}.
+
+resp_map() ->
+    %% there are a number of fields that we're not including currently:
+    %% - throttle time
+    %% - partition
+    %% - message set size
+    %% - topic name
+    #{high_water_mark => 0,
+      message_set => []}.
