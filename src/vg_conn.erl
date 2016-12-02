@@ -95,53 +95,16 @@ handle_request(<<ApiKey:16/signed, _ApiVersion:16/signed, CorrelationId:32/signe
 handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
                                  _MinBytes:32/signed, Rest/binary>>, CorrelationId, Socket) ->
     {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
-    lager:debug("offset ~p", [Offset]),
-    case Offset of
-        0 ->
-            %% get all active segments
-            Segments = vg_utils:find_segments(Topic, Partition, 0),
-            {Files, Bytes0} =
-                lists:unzip([begin
-                                 F = vg_utils:log_file(Topic, Partition, Seg),
-                                 {F, filelib:file_size(F)}
-                             end || Seg <- Segments]),
-            Bytes = lists:sum(Bytes0),
-            try
-                gen_tcp:send(Socket, <<(Bytes + 4):32/signed, CorrelationId:32/signed>>),
-                _ = [file:sendfile(F, Socket) || F <- Files],
-                ok
-            catch _ -> ok
-            end;
-        _ ->
-            %% get the starting segment and position within it.
-            {SegmentId, Position} = vg_utils:find_segment_offset(Topic, Partition, Offset),
-            lager:debug("segment ~p position ~p", [SegmentId, Position]),
+    {SegmentId, Position} = vg_utils:find_segment_offset(Topic, Partition, Offset),
 
-            %% get all active segments
-            Segments0 = vg_utils:find_segments(Topic, Partition, 0),
-            %% filter out irrelevant segments
-            Segments = lists:filter(fun(Item) -> Item >= Offset
-                                                     andalso Item =/= SegmentId end, Segments0),
-            lager:debug("segments ~p ~p", [Segments0, Segments]),
-            {ExtraFiles, ExtraBytes0} =
-                lists:unzip([begin
-                         F = vg_utils:log_file(Topic, Partition, Seg),
-                                 {F, filelib:file_size(F)}
-                             end || Seg <- Segments]),
-            ExtraBytes = lists:sum(ExtraBytes0),
-            lager:debug("extra bytes ~p", [ExtraBytes]),
-            File = vg_utils:log_file(Topic, Partition, SegmentId),
-            {ok, Fd} = file:open(File, [read, binary, raw]),
-            try
-                Bytes =  filelib:file_size(File) - Position,
-                gen_tcp:send(Socket, <<(Bytes + ExtraBytes + 4):32/signed, CorrelationId:32/signed>>),
-                {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, []),
-                %% send the rest, if any
-                [{ok, _} = file:sendfile(F, Socket) || F <- ExtraFiles],
-                lager:debug("sent ~p", [ExtraFiles])
-            after
-                file:close(Fd)
-            end
+    File = vg_utils:log_file(Topic, Partition, SegmentId),
+    {ok, Fd} = file:open(File, [read, binary, raw]),
+    try
+        Bytes = filelib:file_size(File) - Position,
+        gen_tcp:send(Socket, <<(Bytes + 4):32/signed, CorrelationId:32/signed>>),
+        {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, [])
+    after
+        file:close(Fd)
     end;
 handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),

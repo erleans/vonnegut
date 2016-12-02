@@ -22,7 +22,7 @@ end_per_testcase(_, Config) ->
     Config.
 
 from_zero(_Config) ->
-    Topic = vg_test_utils:create_random_name(<<"test_topic">>),
+    Topic = vg_test_utils:create_random_name(<<"consumer_SUITE_test_topic">>),
     Partition = 0,
     TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
     ok = vg:create_topic(Topic),
@@ -33,7 +33,7 @@ from_zero(_Config) ->
                  vg_client:produce(Topic, [<<"message 1 wasn't long enough to make wrapping fail">>,
                                            <<"message 2">>])),
 
-    #{message_set := Data} = vg_client:fetch(Topic),
+    #{message_set := Data} = vg_client:fetch_until(Topic, 1),
     ?assertEqual([<<"message 1 wasn't long enough to make wrapping fail">>, <<"message 2">>], Data),
     vg_client_pool:stop(),
     ok.

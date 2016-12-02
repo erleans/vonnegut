@@ -185,7 +185,6 @@ decode_fetch_response(<<ID:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?M
       high_water_mark := Mark} = Acc,
     Mark1 = max(ID, Mark),
     Set1 = [KV | Set],
-    lager:info("decode fetch ~p ~p", [ID, KV]),
     decode_fetch_response(Rest, Acc#{message_set := Set1, high_water_mark := Mark1});
 decode_fetch_response(Data, Acc) ->
     {more, Data, Acc}.

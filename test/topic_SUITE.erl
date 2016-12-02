@@ -24,7 +24,7 @@ end_per_suite(Config) ->
     Config.
 
 creation(Config) ->
-    Topic = vg_test_utils:create_random_name(<<"test_topic">>),
+    Topic = vg_test_utils:create_random_name(<<"creation_test_topic">>),
     Partition = 0,
     TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
     vg:create_topic(Topic),

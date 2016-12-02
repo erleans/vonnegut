@@ -31,18 +31,18 @@ fetch_until(Topic, Target) ->
 
 fetch_until(Topic, Position, Target) ->
     Loop =
-        fun Loop(Acc) ->
-                Resp0 = shackle:call(vg_client_pool, {fetch, Topic, 0, Position}),
+        fun Loop(Acc=#{high_water_mark := Offset}) ->
+                Resp0 = shackle:call(vg_client_pool, {fetch, Topic, 0, Offset}),
                 Resp = merge_fetch_response(Acc, Resp0),
                 #{high_water_mark := Mark} = Resp,
                 case Mark >= Target of
                     true ->
                         Resp;
                     _ ->
-                        Loop(Resp)
+                        Loop(Resp#{high_water_mark => Mark+1})
                 end
         end,
-    Loop(#{message_set => [], high_water_mark => 0}).
+    Loop(#{message_set => [], high_water_mark => Position}).
 
 merge_fetch_response(One, Two) ->
     #{message_set := Set1} = One,

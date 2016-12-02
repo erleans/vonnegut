@@ -101,18 +101,16 @@ code_change(_, State, _) ->
 %%
 
 write_message_set(MessageSet, State) ->
-    lists:foldl(fun(Message, {FirstID, StateAcc=#state{id=Id,
-                                                       byte_count=ByteCount}}) ->
-                        {NextId, Size, Bytes} = vg_protocol:encode_message(Id, Message),
-                        StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
-                        update_log(Bytes, StateAcc1),
-                        StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
-                        StateAcc3 = update_index(StateAcc2),
-                        FirstID1 = case FirstID of first -> Id; _ -> FirstID end,
-                        {FirstID1,
-                         StateAcc3#state{id=NextId,
-                                          pos=Position1+Size}}
-                end, {first, State}, MessageSet).
+    {State#state.id, lists:foldl(fun(Message, StateAcc=#state{id=Id,
+                                                              byte_count=ByteCount}) ->
+                                     {NextId, Size, Bytes} = vg_protocol:encode_message(Id, Message),
+                                     StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
+                                     update_log(Bytes, StateAcc1),
+                                     StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
+                                     StateAcc3 = update_index(StateAcc2),
+                                     StateAcc3#state{id=NextId,
+                                                     pos=Position1+Size}
+                                 end, State, MessageSet)}.
 
 %% Create new log segment and index file if current segment is too large
 %% or if the index file is over its max and would be written to again.
