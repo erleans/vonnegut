@@ -1,0 +1,25 @@
+machine:
+  environment:
+    OTP_VSN: 19.1
+    PATH: ${HOME}/extras/bin:${HOME}/extras/otp/${OTP_VSN}/bin:${PATH}
+
+dependencies:
+  cache_directories:
+    - ~/extras
+    - _build/default/lib
+  pre:
+    - wget https://raw.githubusercontent.com/spawngrid/kerl/master/kerl
+    - chmod a+x kerl
+    - if [ ! -d ~/extras/otp/${OTP_VSN} ]; then ./bin/circleci_long ./kerl build ${OTP_VSN} ${OTP_VSN}; ./kerl install ${OTP_VSN} ~/extras/otp/${OTP_VSN}; fi
+
+    - wget https://s3.amazonaws.com/rebar3/rebar3
+    - chmod +x ./rebar3
+    - ./rebar3 compile
+
+test:
+  override:
+    - mkdir -p $CIRCLE_TEST_REPORTS/junit/
+    - ./rebar3 ct
+  post:
+    - mv _build/test/logs/ct_run*/junit_report.xml $CIRCLE_TEST_REPORTS/junit/
+    - mv _build/test/logs $CIRCLE_ARTIFACTS
