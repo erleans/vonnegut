@@ -20,6 +20,7 @@ init_per_testcase(_, Config) ->
     Config.
 
 end_per_testcase(_, Config) ->
+    application:unload(vonnegut),
     Config.
 
 delete_policy(_Config) ->

@@ -77,14 +77,14 @@ init([Topic, Partition, NextBrick]) ->
 handle_call({write, MessageSet}, _From, State=#state{topic=Topic,
                                                      partition=Partition,
                                                      next_brick=NextBrick}) ->
-    State1 = write_message_set(MessageSet, State),
+    {FirstID, State1} = write_message_set(MessageSet, State),
     case NextBrick of
         last ->
             ok;
         _ ->
             teleport:gs_call({binary_to_atom(<<Topic/binary, Partition>>, utf8), NextBrick}, {write, MessageSet}, 5000)
     end,
-    {reply, {ok, State1#state.id}, State1}.
+    {reply, {ok, FirstID}, State1}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -101,16 +101,16 @@ code_change(_, State, _) ->
 %%
 
 write_message_set(MessageSet, State) ->
-    lists:foldl(fun(Message, StateAcc=#state{id=Id,
-                                             byte_count=ByteCount}) ->
-                        {NextId, Size, Bytes} = vg_protocol:encode_message(Id, Message),
-                        StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
-                        update_log(Bytes, StateAcc1),
-                        StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
-                        StateAcc3 = update_index(StateAcc2),
-                        StateAcc3#state{id=NextId,
-                                        pos=Position1+Size}
-                end, State, MessageSet).
+    {State#state.id, lists:foldl(fun(Message, StateAcc=#state{id=Id,
+                                                              byte_count=ByteCount}) ->
+                                     {NextId, Size, Bytes} = vg_protocol:encode_message(Id, Message),
+                                     StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
+                                     update_log(Bytes, StateAcc1),
+                                     StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
+                                     StateAcc3 = update_index(StateAcc2),
+                                     StateAcc3#state{id=NextId,
+                                                     pos=Position1+Size}
+                                 end, State, MessageSet)}.
 
 %% Create new log segment and index file if current segment is too large
 %% or if the index file is over its max and would be written to again.
@@ -129,6 +129,9 @@ maybe_roll(Size, State=#state{id=Id,
   when Position+Size > SegmentBytes
      orelse (ByteCount+Size >= IndexIntervalBytes
             andalso IndexPosition+6 > IndexMaxBytes) ->
+    lager:debug("seg size ~p max size ~p", [Position+Size, SegmentBytes]),
+    lager:debug("index interval size ~p max size ~p", [ByteCount+Size, IndexIntervalBytes]),
+    lager:debug("index pos ~p max size ~p", [IndexPosition+6, IndexMaxBytes]),
     ok = file:close(LogFile),
     ok = file:close(IndexFile),
 
@@ -168,6 +171,7 @@ new_index_log_files(TopicDir, Id) ->
     IndexFilename = vg_utils:index_file(TopicDir, Id),
     LogFilename = vg_utils:log_file(TopicDir, Id),
 
+    lager:debug("opening new log files: ~p ~p ~p", [Id, IndexFilename, LogFilename]),
     %% Make sure empty?
     {ok, IndexFile} = vg_utils:open_append(IndexFilename),
     {ok, LogFile} = vg_utils:open_append(LogFilename),

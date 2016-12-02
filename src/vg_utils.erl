@@ -13,7 +13,7 @@
 
 %% log segment servers are registered as {vg_log_segment,Topic,Partition,SegmentId}
 -define(LOG_SEGMENT_MATCH_PATTERN(Topic, Partition), {{n,l,{vg_log_segment,Topic,Partition,'$1'}},'$2','$3'}).
--define(LOG_SEGMENT_GUARD(MessageId), [{is_integer, '$1'}, {'<', '$1', MessageId}]).
+-define(LOG_SEGMENT_GUARD(MessageId), [{is_integer, '$1'}, {'=<', '$1', MessageId}]).
 -define(LOG_SEGMENT_RETURN, ['$1']).
 
 -spec find_log_segment(Topic, Partition, MessageId) -> integer() when
@@ -37,10 +37,9 @@ find_log_segment(Topic, Partition, MessageId) ->
       Topic     :: binary(),
       Partition :: integer().
 find_active_segment(Topic, Partition) ->
-    %% Find all registered log segments for topic-partition < the messageid we are looking for
     case gproc:select({l,n}, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
-                              [],
-                              ?LOG_SEGMENT_RETURN}]) of
+                               [],
+                               ?LOG_SEGMENT_RETURN}]) of
         [] ->
             0;
         Matches  ->

@@ -13,6 +13,10 @@
  {<<"shackle">>,
   {git,"https://github.com/lpgauth/shackle.git",
        {ref,"14c50629f285f25991ba4fb91177838701a7b815"}},
+  0},
+ {<<"teleport">>,
+  {git,"https://github.com/tsloughter/teleport.git",
+       {ref,"baeacc8948652015f02620c5c7a83f88628c0faf"}},
   0}]}.
 [
 {pkg_hash,[

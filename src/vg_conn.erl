@@ -64,7 +64,7 @@ handle_info({'DOWN', MRef, port, _, _}, State=#state{socket=Socket,
                                                      ref=MRef}) ->
     %% Listen socket closed, receive all pending data then stop. In more
     %% advanced protocols will likely be able to do better.
-    error_logger:info_msg("Gracefully closing ~p~n", [Socket]),
+    lager:info("Gracefully closing ~p~n", [Socket]),
     {stop, flush_socket(Socket), State};
 handle_info(_, State) ->
     {noreply, State}.
