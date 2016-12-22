@@ -43,7 +43,6 @@ write(Config) ->
                    "each according to their needs">>,
     #{topic := Topic, offset := R1} = vg_client:produce(Topic, Communist),
     ct:pal("reply: ~p", [R1]),
-    timer:sleep(1000),
     #{message_set := Reply} = vg_client:fetch(Topic, R1),
     ?assertEqual([Communist], Reply),
     #{message_set := Reply1} = vg_client:fetch_until(Topic, R1 - 1, R1),
