@@ -1,0 +1,52 @@
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.chain.name }}
+  labels:
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    app: {{ template "fullname" . }}
+    type: statefulset
+spec:
+  serviceName: "{{ .Values.service.name }}"
+  replicas: {{ .Values.replicaCount }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "fullname" . }}
+        type: node
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+        command: ["/opt/vonnegut/bin/vonnegut", "foreground"]
+
+        ports:
+        - containerPort: {{ .Values.service.internalPort }}
+        volumeMounts:
+        - name: data
+          mountPath: /opt/vonnegut/data
+        env:
+        - name: DISCOVERY_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: "{{ .Release.Name }}-vonnegut-config"
+              key: vonnegut.discovery_domain
+        - name: REPLICAS
+          valueFrom:
+            configMapKeyRef:
+              name: "{{ .Release.Name }}-vonnegut-config"
+              key: vonnegut.replicas
+
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      annotations:
+        volume.alpha.kubernetes.io/storage-class: hostpath
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 256Mi
