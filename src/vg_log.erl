@@ -41,9 +41,6 @@ start_link(Topic, Partition, NextBrick) ->
 write(Topic, Partition, MessageSet) ->
     gen_server:call(?SERVER(Topic, Partition), {write, MessageSet}).
 
-%% update_next_brick(Topic, Partition, NextBrick) ->
-%%     gen_server:call(?SERVER(Topic, Partition), {update_next_brick, NextBrick}).
-
 init([Topic, Partition, NextBrick]) ->
     Config = setup_config(),
     Partition = 0,
@@ -74,16 +71,13 @@ init([Topic, Partition, NextBrick]) ->
                }}.
 
 
-handle_call({write, MessageSet}, _From, State=#state{topic=Topic,
-                                                     partition=Partition,
-                                                     next_brick=NextBrick}) ->
+handle_call({write, MessageSet}, _From, State=#state{topic=_Topic,
+                                                     partition=_Partition,
+                                                     next_brick=_NextBrick}) ->
     {FirstID, State1} = write_message_set(MessageSet, State),
-    case NextBrick of
-        last ->
-            ok;
-        _ ->
-            teleport:gs_call({binary_to_atom(<<Topic/binary, Partition>>, utf8), NextBrick}, {write, MessageSet}, 5000)
-    end,
+
+    %% add to history and replicate
+
     {reply, {ok, FirstID}, State1}.
 
 handle_cast(_Msg, State) ->
