@@ -9,7 +9,9 @@
          log_file/3,
          topic_dir/2,
          open_append/1,
-         open_read/1]).
+         open_read/1,
+
+         to_integer/1]).
 
 %% log segment servers are registered as {vg_log_segment,Topic,Partition,SegmentId}
 -define(LOG_SEGMENT_MATCH_PATTERN(Topic, Partition), {{n,l,{vg_log_segment,Topic,Partition,'$1'}},'$2','$3'}).
@@ -86,3 +88,7 @@ open_append(Filename) ->
 
 open_read(Filename) ->
     file:open(Filename, [read, raw, binary]).
+
+to_integer(I) when is_integer(I) -> I;
+to_integer(I) when is_list(I) -> list_to_integer(I);
+to_integer(I) when is_binary(I) -> binary_to_integer(I).

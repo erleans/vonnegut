@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Release.Name }}-vonnegut-config"
+data:
+  vonnegut.discovery_domain: "{{ .Values.service.name }}.default.svc.cluster.local"
+  vonnegut.replicas: "{{ .Values.replicaCount }}"

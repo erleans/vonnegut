@@ -35,14 +35,14 @@ init([]) ->
     {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
     Topics = topic_childspecs(LogDir ++ atom_to_list(node())),
 
-    %% Chains = {vg_chains, {vg_chains, start_link, []},
-    %%           permanent, 20000, worker, [vg_chains]},
+    ChainState = {vg_chain_state, {vg_chain_state, start_link, []},
+                   permanent, 20000, worker, [vg_chain_state]},
     TopicServer = {vg_topics, {vg_topics, start_link, []},
                    permanent, 20000, worker, [vg_topics]},
     PoolSup = {vg_pool_sup, {vg_pool_sup, start_link, []},
                permanent, 20000, supervisor, [vg_pool_sup]},
 
-    {ok, {{one_for_one, 10, 30}, [PoolSup, TopicServer | Topics]}}.
+    {ok, {{one_for_one, 10, 30}, [ChainState, PoolSup, TopicServer | Topics]}}.
 
 %%====================================================================
 %% Internal functions
