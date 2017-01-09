@@ -9,8 +9,8 @@
     lager,
     sasl,
     gproc,
-    teleport,
     acceptor_pool,
+    shackle,
     erlware_commons,
     partisan
    ]},
@@ -30,6 +30,7 @@
         {delayed_write_byte_size, 64000}, %% 64kb
         {delayed_write_milliseconds, 2000}, %% 2 seconds
 
+        {log_cleaner, true},
         {log_retention_check_interval, 5}, %% 5 minutes
         {log_retention_minutes, 10080}, %% 7 days
 

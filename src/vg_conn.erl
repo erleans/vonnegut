@@ -95,7 +95,7 @@ handle_request(<<ApiKey:16/signed, _ApiVersion:16/signed, CorrelationId:32/signe
 handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
                                  _MinBytes:32/signed, Rest/binary>>, CorrelationId, Socket) ->
     {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
-    {SegmentId, Position} = vg_utils:find_segment_offset(Topic, Partition, Offset),
+    {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
 
     File = vg_utils:log_file(Topic, Partition, SegmentId),
     {ok, Fd} = file:open(File, [read, binary, raw]),
@@ -109,7 +109,7 @@ handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
 handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
     Results = [{Topic, [begin
-                            {ok, Offset} = vg_log:write(Topic, Partition, MessageSet),
+                            {ok, Offset} = vg_active_segment:write(Topic, Partition, MessageSet),
                             {Partition, ?NONE_ERROR, Offset}
                         end || {Partition, MessageSet} <- PartitionData]}
               || {Topic, PartitionData} <- TopicData],
