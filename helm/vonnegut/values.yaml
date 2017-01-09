@@ -1,0 +1,21 @@
+# Default values for vonnegut.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+replicaCount: 2
+image:
+  repository: vonnegut
+  tag: 0.0.1
+  pullPolicy: IfNotPresent
+service:
+  name: vonnegut
+  externalPort: 5555
+  internalPort: 5555
+chain:
+  name: chain1
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

@@ -7,14 +7,15 @@
    [kernel,
     stdlib,
     lager,
+    sasl,
     gproc,
     teleport,
     acceptor_pool,
     erlware_commons,
-    hash_ring
+    partisan
    ]},
   {env,[{log_dirs, ["./data"]},
-        {port, 5555},
+        {port, "5555"},
         {acceptor_pool_size, 10},
         {client_pool_size, 2},
 

@@ -18,3 +18,5 @@ _plugins
 _tdeps
 logs
 _build
+rebar3.crashdump
+vonnegut.tar.gz

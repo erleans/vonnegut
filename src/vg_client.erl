@@ -5,7 +5,6 @@
 -export([fetch/1, fetch/2,
          fetch_until/2, fetch_until/3,
          produce/2,
-
          init/0,
          setup/2,
          handle_request/2,

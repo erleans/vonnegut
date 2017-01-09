@@ -45,13 +45,6 @@ init([Topic, Partitions]) ->
 
 child_specs(Topic, Partition) ->
     Segments = segments(Topic, Partition),
-    %% Chain = vg_chains:chain(Topic, Partition),
-    %% NextBrick = case lists:dropwhile(fun({_, Node, _, _}) -> Node =/= node() end, Chain) of
-    %%                 [_, {_, N, _, _} | _] ->
-    %%                     N;
-    %%                 _ ->
-    %%                     last
-    %%             end,
 
     %% Must start segments before partition proc so it can find which segment is active
     [#{id      => {Topic, Partition},
