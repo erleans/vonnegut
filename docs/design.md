@@ -63,6 +63,18 @@ The client is responsible for whether it wants to wait for an ack from the tail.
 
 ## Clients
 
+Clients discover chains through DNS records much the same as chains discover each other. After discovery chains (each individual chain has a unique DNS record named for the chain) the client can query a vonnegut node for information on the location of topics.
 
+The client caches the information about where the head and tail of chains are and have no need to update this information unless a request fails. In the event a client attempts to read from an old `tail` the node it is requesting from (assuming it is alive and the request doesn't just fail) returns the `tail` of the chain if it knows it, otherwise the client must query the `head` for an updated view of the chain.
 
-## Permanent Subscriptions
+## DNS
+
+SRV query `vonnegut` resolves to all chain node records `<chain>-{0..N}.vonnegut`. The records `<chain>-{0..N}.vonnegut` resolve to individual nodes in the chain named `<chain>`.
+
+## References
+
+* [Chain Replication for Supporting High Throughput and Availability](http://www.cs.cornell.edu/home/rvr/papers/OSDI04.pdf)
+* [Chain replication in theory and in practice](http://www.snookles.com/scott/publications/erlang2010-slf.pdf)
+* [Kubernetes](http://kubernetes.io/)
+* [Kubernetes StatefulSets](http://kubernetes.io/docs/concepts/abstractions/controllers/statefulsets/)
+* [Kafka Protocol](https://kafka.apache.org/protocol)
