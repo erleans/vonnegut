@@ -45,7 +45,7 @@ Requirements:
  * [minikube](https://github.com/kubernetes/minikube)
  * [helm](http://helm.sh/)
 
-After installing and starting [minikube](https://github.com/kubernetes/minikube) set your docker environment to use the docker daemon in the minikube VM:
+After installing (see mac instructions below) and starting [minikube](https://github.com/kubernetes/minikube) set your docker environment to use the docker daemon in the minikube VM:
 
 ```shell
 $ eval $(minikube docker-env)
@@ -115,3 +115,26 @@ NAME       READY     STATUS    RESTARTS   AGE
 chain1-0   1/1       Running   0          26m
 chain1-1   1/1       Running   0          25m
 ```
+
+#### Mac installation notes
+
+Install minikube via the commands in the instructions and helm via `brew install kubernetes-helm`, and go (via `brew install go`) if you don't have it installed.  If you have to install go, remember to set up your `GOPATH`.
+
+Then the following incantation will build the xhyve driver to work with Docker for Mac:
+
+```shell 
+brew install xhyve
+export GO15VENDOREXPERIMENT=1
+go get -u -d github.com/zchee/docker-machine-driver-xhyve
+cd $GOPATH/src/github.com/zchee/docker-machine-driver-xhyve
+make install  # this will prompt for your password
+sudo chown root:wheel /usr/local/bin/docker-machine-driver-xhyve
+sudo chmod u+s /usr/local/bin/docker-machine-driver-xhyve
+minikube start --vm-driver=xhyve --container-runtime=docker --show-libmachine-logs --v=10 --alsologtostderr
+eval $(minikube docker-env)
+bin/docker_build.sh
+```
+
+Note that this does not currently work because of a version mismatch between the version of docker bundled with minikube and the one in Docker for Mac, but I'm preserving these instructions in the hopes that it works one day.
+
+
