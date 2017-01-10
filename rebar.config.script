@@ -1,0 +1,7 @@
+case os:getenv("CIRCLECI") of
+  "true" ->
+        JobId   = os:getenv("CIRCLE_BUILD_NUM"),
+        lists:keystore(coveralls_service_job_id, 1, CONFIG, {coveralls_service_job_id, JobId});
+    _ ->
+        CONFIG
+end.
