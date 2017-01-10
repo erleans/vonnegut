@@ -12,7 +12,7 @@
          code_change/3]).
 
 -record(state, {
-          role      :: head | tail | middle | solo,
+          role      :: head | tail | middle | solo | undefined,
           members   :: ordsets:ordset(),
           next_node :: atom() | tail,
           replicas  :: integer(),
