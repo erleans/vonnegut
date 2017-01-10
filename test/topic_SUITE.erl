@@ -12,7 +12,7 @@ init_per_suite(Config) ->
     lager:start(),
     application:load(vonnegut),
     application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
-    application:ensure_all_started(vonnegut),
+    {ok, _} = application:ensure_all_started(vonnegut),
     ok = vg_client_pool:start(),
     Topic = vg_test_utils:create_random_name(<<"default_topic">>),
     vg:create_topic(Topic),

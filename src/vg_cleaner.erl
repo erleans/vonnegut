@@ -83,7 +83,6 @@ run_cleaner_(TopicDir, Topic, Partition, RetentionSeconds) ->
                               Diff >= RetentionSeconds ->
                                   SegmentId = filename:basename(Segment, ".log"),
                                   lager:info("at=delete topic=~s partition=~p segment=~s", [Topic, Partition, SegmentId]),
-                                  ok = vg_log_segment:stop(Topic, Partition, list_to_integer(SegmentId)),
                                   RootName = filename:rootname(Segment),
                                   ok = file:delete(RootName++".index"),
                                   ok = file:delete(Segment);

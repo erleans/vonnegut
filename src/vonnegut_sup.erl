@@ -37,12 +37,10 @@ init([]) ->
 
     ChainState = {vg_chain_state, {vg_chain_state, start_link, []},
                    permanent, 20000, worker, [vg_chain_state]},
-    TopicServer = {vg_topics, {vg_topics, start_link, []},
-                   permanent, 20000, worker, [vg_topics]},
     PoolSup = {vg_pool_sup, {vg_pool_sup, start_link, []},
                permanent, 20000, supervisor, [vg_pool_sup]},
 
-    {ok, {{one_for_one, 10, 30}, [ChainState, PoolSup, TopicServer | Topics]}}.
+    {ok, {{one_for_one, 10, 30}, [ChainState, PoolSup | Topics]}}.
 
 %%====================================================================
 %% Internal functions

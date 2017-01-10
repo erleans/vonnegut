@@ -1,5 +1,5 @@
 %%
--module(vg_log).
+-module(vg_active_segment).
 
 -behaviour(gen_server).
 
@@ -41,9 +41,6 @@ start_link(Topic, Partition, NextBrick) ->
 write(Topic, Partition, MessageSet) ->
     gen_server:call(?SERVER(Topic, Partition), {write, MessageSet}).
 
-%% update_next_brick(Topic, Partition, NextBrick) ->
-%%     gen_server:call(?SERVER(Topic, Partition), {update_next_brick, NextBrick}).
-
 init([Topic, Partition, NextBrick]) ->
     Config = setup_config(),
     Partition = 0,
@@ -74,16 +71,13 @@ init([Topic, Partition, NextBrick]) ->
                }}.
 
 
-handle_call({write, MessageSet}, _From, State=#state{topic=Topic,
-                                                     partition=Partition,
-                                                     next_brick=NextBrick}) ->
+handle_call({write, MessageSet}, _From, State=#state{topic=_Topic,
+                                                     partition=_Partition,
+                                                     next_brick=_NextBrick}) ->
     {FirstID, State1} = write_message_set(MessageSet, State),
-    case NextBrick of
-        last ->
-            ok;
-        _ ->
-            teleport:gs_call({binary_to_atom(<<Topic/binary, Partition>>, utf8), NextBrick}, {write, MessageSet}, 5000)
-    end,
+
+    %% add to history and replicate
+
     {reply, {ok, FirstID}, State1}.
 
 handle_cast(_Msg, State) ->
@@ -136,7 +130,7 @@ maybe_roll(Size, State=#state{id=Id,
     ok = file:close(IndexFile),
 
     {NewIndexFile, NewLogFile} = new_index_log_files(TopicDir, Id),
-    vg_topic_sup:start_segment(Topic, Partition, Id),
+    vg_log_segments:insert(Topic, Partition, Id),
 
     State#state{log_fd=NewLogFile,
                 index_fd=NewIndexFile,
@@ -178,7 +172,7 @@ new_index_log_files(TopicDir, Id) ->
     {IndexFile, LogFile}.
 
 find_latest_id(TopicDir, Topic, Partition) ->
-    SegmentId = vg_utils:find_active_segment(Topic, Partition),
+    SegmentId = vg_log_segments:find_active_segment(Topic, Partition),
     IndexFilename = vg_utils:index_file(TopicDir, SegmentId),
     {Offset, Position} = last_in_index(TopicDir, IndexFilename, SegmentId),
     LogSegmentFilename = vg_utils:log_file(TopicDir, SegmentId),

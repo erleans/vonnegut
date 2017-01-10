@@ -8,8 +8,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/2,
-         start_segment/3]).
+-export([start_link/2]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -22,13 +21,6 @@
 
 start_link(Topic, Partitions) ->
     supervisor:start_link({via, gproc, {n,l,Topic}}, ?MODULE, [Topic, Partitions]).
-
--spec start_segment(Topic, Partition, SegmentId) -> supervisor:startchild_ret() when
-      Topic     :: binary(),
-      Partition :: integer(),
-      SegmentId :: integer().
-start_segment(Topic, Partition, SegmentId) ->
-    supervisor:start_child({via, gproc, {n,l,Topic}}, log_segment_childspec(Topic, Partition, SegmentId)).
 
 %%====================================================================
 %% Supervisor callbacks
@@ -44,33 +36,17 @@ init([Topic, Partitions]) ->
 %%====================================================================
 
 child_specs(Topic, Partition) ->
-    Segments = segments(Topic, Partition),
-
-    %% Must start segments before partition proc so it can find which segment is active
+    vg_log_segments:load_all(Topic, Partition),
     [#{id      => {Topic, Partition},
-       start   => {vg_log, start_link, [Topic, Partition, last]},
+       start   => {vg_active_segment, start_link, [Topic, Partition, last]},
        restart => permanent,
-       type    => worker},
-     #{id      => {cleaner, Topic, Partition},
-       start   => {vg_cleaner, start_link, [Topic, Partition]},
-       restart => permanent,
-       type    => worker} | Segments].
-
--spec segments(Topic, Partition) -> [] when
-      Topic     :: binary(),
-      Partition :: integer().
-segments(Topic, Partition) ->
-    TopicDir = vg_utils:topic_dir(Topic, Partition),
-    case filelib:wildcard(filename:join(TopicDir, "*.log")) of
-        [] ->
-            [log_segment_childspec(Topic, Partition, 0)];
-        LogSegments ->
-            [log_segment_childspec(Topic, Partition, list_to_integer(filename:basename(LogSegment, ".log")))
-            || LogSegment <- LogSegments]
-    end.
-
-log_segment_childspec(Topic, Partition, LogSegment) ->
-    #{id      => {Topic, Partition, LogSegment},
-      start   => {vg_log_segment, start_link, [Topic, Partition, LogSegment]},
-      restart => transient,
-      type    => worker}.
+       type    => worker} |
+     case application:get_env(vonnegut, log_cleaner, true) of
+         true ->
+             [#{id      => {cleaner, Topic, Partition},
+                start   => {vg_cleaner, start_link, [Topic, Partition]},
+                restart => permanent,
+                type    => worker}];
+         false ->
+             []
+     end].
