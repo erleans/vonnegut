@@ -19,7 +19,7 @@ dependencies:
 test:
   override:
     - mkdir -p $CIRCLE_TEST_REPORTS/junit/
-    - ./rebar3 ct
+    - ./rebar3 do dialyzer, xref, ct, cover
   post:
     - mv _build/test/logs/ct_run*/junit_report.xml $CIRCLE_TEST_REPORTS/junit/
     - mv _build/test/logs $CIRCLE_ARTIFACTS
