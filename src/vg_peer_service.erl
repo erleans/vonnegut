@@ -12,7 +12,7 @@ join(Node) when is_atom(Node) ->
     partisan_peer_service:join(Node).
 
 leave() ->
-    partisan_default_peer_service:leave().
+    partisan_peer_service:leave([]).
 
 on_down(Name, Fun) ->
     partisan_default_peer_service_manager:on_down(Name, Fun).

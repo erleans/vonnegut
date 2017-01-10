@@ -20,7 +20,7 @@ fetch(Topic) ->
 fetch(Topic, Offset) ->
     Partition = 0,
     {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
-    File = vg_log_segments:log_file(Topic, Partition, SegmentId),
+    File = vg_utils:log_file(Topic, Partition, SegmentId),
     Size = filelib:file_size(File),
     {ok, Fd} = file:open(File, [read, binary, raw]),
     {ok, [Data]} = file:pread(Fd, [{Position, Size}]),
