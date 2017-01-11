@@ -1,6 +1,9 @@
 vonnegut
 =====
 
+[![CircleCI](https://circleci.com/gh/GOFactory/vonnegut.svg?style=svg)](https://circleci.com/gh/GOFactory/vonnegut)
+
+[![Coverage Status](https://coveralls.io/repos/github/GOFactory/vonnegut/badge.svg?branch=master)](https://coveralls.io/github/GOFactory/vonnegut?branch=master)
 
 Build
 -----
