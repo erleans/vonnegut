@@ -5,7 +5,7 @@
 -compile(export_all).
 
 all() ->
-    [creation, write].
+    [creation, write, ack].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -14,25 +14,27 @@ init_per_suite(Config) ->
     application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
     {ok, _} = application:ensure_all_started(vonnegut),
     ok = vg_client_pool:start(),
-    Topic = vg_test_utils:create_random_name(<<"default_topic">>),
-    vg:create_topic(Topic),
-    [{topics, [Topic]} | Config].
+    Config.
 
 end_per_suite(Config) ->
     vg_client_pool:stop(),
     application:stop(vonnegut),
     Config.
 
-creation(Config) ->
+init_per_testcase(_, Config) ->
+    Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
+    vg:create_topic(Topic),
+    [{topic, Topic} | Config].
+
+creation(_Config) ->
     Topic = vg_test_utils:create_random_name(<<"creation_test_topic">>),
     Partition = 0,
     TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
     vg:create_topic(Topic),
-    ?assert(filelib:is_dir(TopicPartitionDir)),
-    add_topic(Topic, Config).
+    ?assert(filelib:is_dir(TopicPartitionDir)).
 
 write(Config) ->
-    Topic = get_topic(Config),
+    Topic = ?config(topic, Config),
     Anarchist = <<"no gods no masters">>,
     [begin
          R = vg_client:produce(Topic, Anarchist),
@@ -46,16 +48,32 @@ write(Config) ->
     #{message_set := Reply} = vg_client:fetch(Topic, R1),
     ?assertEqual([Communist], Reply),
     #{message_set := Reply1} = vg_client:fetch_until(Topic, R1 - 1, R1),
-    ?assertEqual([Anarchist, Communist], Reply1),
-    Config.
+    ?assertEqual([Anarchist, Communist], Reply1).
 
-%%% helpers
+ack(Config) ->
+    Topic = ?config(topic, Config),
 
-add_topic(Topic, Config) ->
-    {_, Topics} = lists:keyfind(topics, 1, Config),
-    Topics1 = [Topic | Topics],
-    lists:keyreplace(topics, 1, Config, {topics, Topics1}).
+    %% write some random messages to the topic
+    Msgs = [begin
+                Msg = crypto:strong_rand_bytes(60),
+                {ok, _Id} = vg:write(Topic, Msg),
+                Msg
+            end
+           || _ <- lists:seq(1, rand:uniform(20))],
 
-get_topic(Config) ->
-    {_, Topics} = lists:keyfind(topics, 1, Config),
-    lists:nth(rand:uniform(length(Topics)), Topics).
+    %% verify written
+    #{message_set := Reply} = vg:fetch(Topic),
+    ?assertEqual(Msgs, Reply),
+
+    %% verify history
+    HistoryTab = binary_to_atom(<<Topic/binary, 0>>, utf8),
+    History = ets:tab2list(HistoryTab),
+    {_, HistoryMsgs} = lists:unzip(lists:sort(History)),
+    #{high_water_mark := HighWaterMark,
+      message_set := HistorySet} = vg_protocol:decode_fetch_response(iolist_to_binary(HistoryMsgs)),
+    ?assertEqual(Msgs, HistorySet),
+
+    %% Ack to the latest Id
+    vg_active_segment:ack(Topic, 0, HighWaterMark),
+    %% History should be empty now
+    ?assertEqual([], ets:tab2list(HistoryTab)).

@@ -3,8 +3,9 @@
 
 -behaviour(gen_server).
 
--export([start_link/3]).
--export([write/3]).
+-export([start_link/3,
+         write/3,
+         ack/3]).
 
 -export([init/1,
          handle_call/3,
@@ -29,19 +30,23 @@
                 index_fd    :: file:fd(),
                 topic       :: binary(),
                 partition   :: integer(),
-
+                history_tab :: atom(),
                 config      :: #config{}
                }).
 
--define(SERVER(Topic, Partition), {via, gproc, {n,l,{Topic,Partition}}}). % binary_to_atom(<<Topic/binary, Partition>>, utf8)).
+-define(SERVER(Topic, Partition), {via, gproc, {n,l,{Topic,Partition}}}).
 
 start_link(Topic, Partition, NextBrick) ->
-    gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick], []).
+    Tab = vg_pending_writes:ensure_tab(Topic, Partition),
+    gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick, Tab], []).
 
 write(Topic, Partition, MessageSet) ->
     gen_server:call(?SERVER(Topic, Partition), {write, MessageSet}).
 
-init([Topic, Partition, NextBrick]) ->
+ack(Topic, Partition, LatestId) ->
+    vg_pending_writes:ack(Topic, Partition, LatestId).
+
+init([Topic, Partition, NextBrick, Tab]) ->
     Config = setup_config(),
     Partition = 0,
     LogDir = Config#config.log_dir,
@@ -67,17 +72,14 @@ init([Topic, Partition, NextBrick]) ->
                 index_fd=IndexFD,
                 topic=Topic,
                 partition=Partition,
-                config=Config
+                config=Config,
+                history_tab=Tab
                }}.
-
 
 handle_call({write, MessageSet}, _From, State=#state{topic=_Topic,
                                                      partition=_Partition,
                                                      next_brick=_NextBrick}) ->
     {FirstID, State1} = write_message_set(MessageSet, State),
-
-    %% add to history and replicate
-
     {reply, {ok, FirstID}, State1}.
 
 handle_cast(_Msg, State) ->
@@ -94,7 +96,7 @@ code_change(_, State, _) ->
 
 %%
 
-write_message_set(MessageSet, State) ->
+write_message_set(MessageSet, State=#state{history_tab=Tab}) ->
     {State#state.id, lists:foldl(fun(Message, StateAcc=#state{id=Id,
                                                               byte_count=ByteCount}) ->
                                      {NextId, Size, Bytes} = vg_protocol:encode_message(Id, Message),
@@ -102,6 +104,9 @@ write_message_set(MessageSet, State) ->
                                      update_log(Bytes, StateAcc1),
                                      StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
                                      StateAcc3 = update_index(StateAcc2),
+
+                                     vg_pending_writes:add(Tab, Id, Bytes),
+
                                      StateAcc3#state{id=NextId,
                                                      pos=Position1+Size}
                                  end, State, MessageSet)}.

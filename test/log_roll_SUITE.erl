@@ -19,10 +19,13 @@ init_per_testcase(_, Config) ->
     Config.
 
 end_per_testcase(_, Config) ->
+    application:stop(vonnegut),
+    %% if we don't unload the settings will stick around in other suites
+    application:unload(vonnegut),
     Config.
 
 message_set_larger_than_max_segment(_Config) ->
-    Topic = vg_test_utils:create_random_name(<<"test_topic">>),
+    Topic = vg_test_utils:create_random_name(<<"log_roll_test_topic">>),
     Partition = 0,
     TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
     vg:create_topic(Topic),
