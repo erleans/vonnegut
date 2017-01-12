@@ -2,6 +2,10 @@
 
 set -xe
 
+if [[ $1 ]]; then
+    REPO=$1
+fi
+
 rebar3 as prod tar
 
 mv _build/prod/rel/vonnegut/vonnegut-*.tar.gz ./
@@ -11,8 +15,11 @@ VERSION=${VERSION/+/-}
 
 mv vonnegut-$VERSION.tar.gz vonnegut.tar.gz
 
-docker build --rm=false -t us.gcr.io/nucleus-sti/vonnegut:$VERSION .
+docker build --rm=false -t vonnegut:$VERSION .
 
-docker push us.gcr.io/nucleus-sti/vonnegut:$VERSION
+if [[ $REPO ]]; then
+    docker tag vonnegut:$VERSION $REPO/vonnegut:$VERSION
+    docker push $REPO/vonnegut:$VERSION
+fi
 
 rm vonnegut.tar.gz
