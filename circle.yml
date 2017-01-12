@@ -1,27 +1,31 @@
-machine:
-  environment:
-    OTP_VSN: 19.1
-    PATH: ${HOME}/extras/bin:${HOME}/extras/otp/${OTP_VSN}/bin:${PATH}
+version: 2
+executorType: docker
+containerInfo:
+  - image: erlang:19.2
+    cmd: ["/bin/bash"]
+stages:
+  build:
+    workDir: ~/vonnegut
+    steps:
+      - type: shell
+        name: Initialize Working Directory
+        pwd: /
+        command: |
+          mkdir /root/vonnegut
 
-dependencies:
-  cache_directories:
-    - ~/extras
-    - _build/default/lib
-    - .cache/rebar3/
-  pre:
-    - wget https://raw.githubusercontent.com/spawngrid/kerl/master/kerl
-    - chmod a+x kerl
-    - if [ ! -d ~/extras/otp/${OTP_VSN} ]; then ./bin/circleci_long ./kerl build ${OTP_VSN} ${OTP_VSN}; ./kerl install ${OTP_VSN} ~/extras/otp/${OTP_VSN}; fi
+      - type: shell
+        shell: /bin/bash
+        command: |
+            set -exu
+            apt-get update
+            apt-get install -y git
 
-    - wget https://s3.amazonaws.com/rebar3/rebar3
-    - chmod +x ./rebar3
-    - ./rebar3 compile
+      - type: checkout
 
-test:
-  override:
-    - mkdir -p $CIRCLE_TEST_REPORTS/junit/
-    - ./rebar3 do dialyzer, xref, ct, cover
-  post:
-    - ./rebar3 coveralls send
-    - mv _build/test/logs/ct_run*/junit_report.xml $CIRCLE_TEST_REPORTS/junit/
-    - mv _build/test/logs $CIRCLE_ARTIFACTS
+      - type: shell
+        shell: /bin/bash
+        command: |
+            set -exu
+
+            rebar3 do dialyzer, xref, ct, cover
+            rebar3 coveralls send
