@@ -40,6 +40,7 @@ stages:
         key: vonnegut-{{ .Branch }}-{{ checksum "rebar.lock" }}
         paths:
           - ~/vonnegut/_build/default/lib
+          - ~/vonnegut/_build/default/plugins
 
       - type: cache-save
         key: erlang-plt-19.2
