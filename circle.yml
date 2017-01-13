@@ -13,8 +13,10 @@ stages:
         key: vonnegut-{{ .Branch }}-{{ checksum "rebar.lock" }}
 
       - type: cache-restore
-        key: vonnegut-hex-packages
+        key: erlang-plt-19.2
 
+      - type: cache-restore
+        key: hex-packages
 
       - type: shell
         shell: /bin/bash
@@ -40,6 +42,11 @@ stages:
           - ~/vonnegut/_build/default/lib
 
       - type: cache-save
-        key: vonnegut-hex-packages
+        key: erlang-plt-19.2
+        paths:
+          - ~/.cache/rebar3/rebar3_19.2_plt
+
+      - type: cache-save
+        key: hex-packages
         paths:
           - ~/.cache/rebar3/hex/default/packages
