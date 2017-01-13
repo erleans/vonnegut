@@ -26,11 +26,8 @@ stages:
             rebar3 do dialyzer, xref, ct, cover
             rebar3 coveralls send
 
-            mkdir -p junit/
-            mv _build/test/logs/ct_run*/junit_report.xml junit/
-
       - type: test-results-store
-        path: ~/vonnegut/junit
+        path: ~/vonnegut/_build/test/logs/
 
       - type: artifacts-store
         path: ~/vonnegut/_build/test/logs
