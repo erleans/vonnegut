@@ -1,25 +1,12 @@
 version: 2
 executorType: docker
 containerInfo:
-  - image: erlang:19.2
+  - image: tsloughter/erlang-git:19.2
     cmd: ["/bin/bash"]
 stages:
   build:
     workDir: ~/vonnegut
     steps:
-      - type: shell
-        name: Initialize Working Directory
-        pwd: /
-        command: |
-          mkdir /root/vonnegut
-
-      - type: shell
-        shell: /bin/bash
-        command: |
-            set -exu
-            apt-get update
-            apt-get install -y git
-
       - type: checkout
 
       - type: shell
