@@ -30,7 +30,7 @@ stages:
             mv _build/test/logs/ct_run*/junit_report.xml junit/
 
       - type: test-results-store
-        path: ~/vonnegut/_build/test/logs/ct_run*
+        path: ~/vonnegut/junit
 
       - type: artifacts-store
         path: ~/vonnegut/_build/test/logs
