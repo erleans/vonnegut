@@ -16,6 +16,7 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
+    partisan:start(),
     vg_log_segments:init_table(),
     vonnegut_sup:start_link().
 

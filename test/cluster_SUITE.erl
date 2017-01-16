@@ -8,19 +8,23 @@
 suite() ->
     [{timetrap,{minutes,30}}].
 
-dont_init_per_suite(Config) ->
+init_per_suite(Config) ->
+    lager:start(),
     %% make a release as test, should likely use better exit status
     %% stuff rather than assuming that it passes
     %% lager:info("~p", [os:cmd("pwd")]),
     0 = sync_cmd("release", "/bin/bash -c '(cd ../../../..; pwd; rebar3 release)'", []),
+
+    %% make sure that the test runner has access to the env vars
+    ok = application:load(vonnegut),
 
     %% start several nodes
     Nodes =
         [begin
              %% fix the names to use the discovery stuff?
              N = integer_to_list(N0),
-             Name = "node" ++ N ++ "@127.0.0.1",
-             Port = integer_to_list(5554 + N0),
+             Name = "chain1-" ++ N ++ "@127.0.0.1",
+             Port = integer_to_list(5555 + N0),
              Env = [{"RELX_REPLACE_OS_VARS", "true"},
                     {"NODE", Name},
                     {"PORT", Port}],
@@ -30,11 +34,14 @@ dont_init_per_suite(Config) ->
              timer:sleep(1000),
              {Pid, list_to_atom(Name)}
          end
-         || N0 <- lists:seq(1, 3)],
+         || N0 <- lists:seq(0, 2)],
 
     %% Collect pids here (actually, using console + cmd() we don't
     %% need to, because console will exit when the testrunner exits).
     ct:pal("ps ~p", [os:cmd("ps aux | grep beam.sm[p]")]),
+
+    %% give everything a bit to come up? TODO: proper wait
+    timer:sleep(15000),
 
     %% establish disterl connections to each of them
     NodeName = 'testrunner@127.0.0.1',
@@ -47,7 +54,7 @@ dont_init_per_suite(Config) ->
      || {_Pid1, Node} <- Nodes],
     [{nodes, Nodes}|Config].
 
-dont_end_per_suite(Config) ->
+end_per_suite(Config) ->
     Nodes = ?config(nodes, Config),
     [begin
          rpc:call(Node, erlang, halt, [0])
@@ -75,9 +82,16 @@ end_per_group(_GroupName, Config) ->
     Config.
 
 init_per_testcase(_TestCase, Config) ->
+    application:load(vonnegut),
+    %% ct:pal("envs: ~p", [application:get_all_env(vonnegut)]),
+    application:start(shackle),
+    ok = vg_client_pool:start(),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
+    application:unload(vonnegut),
+    ok = vg_client_pool:stop(),
+    application:stop(shackle),
     Config.
 
 groups() ->
@@ -85,7 +99,7 @@ groups() ->
      {init,
       [],
       [
-       %bootstrap
+       bootstrap
       ]},
      {operations,
       [],
@@ -100,18 +114,16 @@ groups() ->
 
 all() ->
     [
-     nop
-     %{group, init} %,
+     {group, init} %,
      %% {group, operations}
     ].
 
 bootstrap(Config) ->
-    application:start(shackle),
-    do(vg, create_topic, [<<"foo">>]),
-    ok = vg_client_pool:start(),
+    %% just create topics when written to for now
+    %% do(vg, create_topic, [<<"foo">>]),
     R = vg_client:produce(<<"foo">>, <<"bar">>),
-    _R = vg_client:fetch(<<"foo">>),
-    ct:pal("r ~p", [R]),
+    R1 = vg_client:fetch(<<"foo">>),
+    ct:pal("r ~p ~p", [R, R1]),
     timer:sleep(200),
     ?assertMatch(foo, R),
     Config.

@@ -9,6 +9,9 @@
 -define(PRODUCE_REQUEST, 0).
 -define(FETCH_REQUEST, 1).
 
+%% non-kafka extension
+-define(TOPICS_REQUEST, 1000).
+
 -define(NONE_ERROR, 0).
 
 -define(SEGMENTS_TABLE, logs_segments_table).

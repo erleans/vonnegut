@@ -57,11 +57,12 @@ handle_info(timeout, State=#state{replicas=Replicas}) ->
             {noreply, State#state{members=Members,
                                   role=Role,
                                   next_node=NextNode,
-                                  active=false}, 100}
+                                  active=false}, 200}
     end;
 handle_info({next_node_down, NextNode}, State) ->
+    %% is this the right place to do this?
     lager:info("next_node_down=~p", [NextNode]),
-    {noreply, State}.
+    {noreply, State#state{active = false}}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -129,8 +130,9 @@ join() ->
                   end,
 
     NewNodes = lookup(ClusterType),
-    ordsets:fold(fun(Node, _) -> vg_peer_service:join(Node) end, ok, NewNodes),
-    NewNodes.
+    R = ordsets:fold(fun(Node, _) -> vg_peer_service:join(Node) end, ok, NewNodes),
+    lager:info("join results: ~p", [R]),
+    [list_to_atom(atom_to_list(Name)++"@"++Host) || {Name, Host, _Port} <- NewNodes].
 
 %% leave() ->
 %%     vg_peer_service:leave([]).

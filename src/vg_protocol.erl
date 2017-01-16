@@ -3,6 +3,8 @@
 -export([encode_fetch/4,
          encode_produce/3,
          encode_request/4,
+
+         encode_array/1,
          encode_message/2,
          encode_string/1,
          encode_bytes/1,
@@ -152,7 +154,9 @@ decode_response(_) ->
 decode_response(?FETCH_REQUEST, Response) ->
     decode_fetch_response(Response);
 decode_response(?PRODUCE_REQUEST, Response) ->
-    decode_produce_response(Response).
+    decode_produce_response(Response);
+decode_response(?TOPICS_REQUEST, Response) ->
+    decode_topics_response(Response).
 
 decode_produce_response(Response) ->
     {TopicResults, _Rest}= decode_array(fun decode_produce_response_topics/1, Response),
@@ -169,6 +173,14 @@ decode_produce_response_topics(<<Size:32/signed, Topic:Size/binary, PartitionsRa
 
 decode_produce_response_partitions(<<Partition:32/signed, ErrorCode:16/signed, Offset:64/signed, Rest/binary>>) ->
     {{Partition, ErrorCode, Offset}, Rest}.
+
+decode_topics_response(Msg) ->
+    {Topics, _rest} = decode_array(fun decode_topics/1, Msg),
+    Topics.
+
+decode_topics(Thing) ->
+    lager:info("decode a thing ~p", [Thing]),
+    {Thing, <<>>}.
 
 decode_fetch_response(Msg) ->
     decode_fetch_response(Msg, resp_map()).

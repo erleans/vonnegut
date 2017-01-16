@@ -8,8 +8,13 @@
          stop/0,
          stop/1]).
 
-join(Node) when is_atom(Node) ->
-    partisan_peer_service:join(Node).
+join(Node) ->
+    {Name, Host, Port} = Node,
+    %% also need to handle fqdn here, but I think it's best fixed in partisan
+    Host1 = string:tokens(Host, "."),
+    HostIP0 = [list_to_integer(Octet) || Octet <- Host1],
+    HostIP = list_to_tuple(HostIP0),
+    partisan_peer_service:join({Name, HostIP, Port}, true).
 
 leave() ->
     partisan_peer_service:leave([]).
