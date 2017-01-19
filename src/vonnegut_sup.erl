@@ -37,10 +37,9 @@ create_topic(Server0, Topic, Partitions) ->
             local -> ?SERVER;
             _ -> {?SERVER, Server0}
         end,
-    lager:info("creating topic on ~p", [Server]),
-    R = supervisor:start_child(Server, topic_childspec(Topic, Partitions)),
-    lager:info("created topic ~p with reply ~p", [Topic, R]),
-    R.
+    lager:info("at=create_topic node=~p topic=~p partitions=~p target=~p",
+               [node(), Topic, Partitions, Server0]),
+    supervisor:start_child(Server, topic_childspec(Topic, Partitions)).
 
 %%====================================================================
 %% Supervisor callbacks

@@ -139,7 +139,8 @@ get_cluster() ->
             undefined ->
                 %% we need a name here, what makes sense for single
                 %% node testing?
-                [#chain{head_host = "127.0.0.1",
+                [#chain{name = <<"local">>,
+                        head_host = "127.0.0.1",
                         head_port = 5555,
                         tail_host = "127.0.0.1",
                         tail_port = 5555}]; % assume local run if unset

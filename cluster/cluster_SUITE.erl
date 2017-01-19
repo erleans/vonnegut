@@ -31,7 +31,6 @@ init_per_suite(Config) ->
                     {"LOG_DIR", "/tmp/vg-s"++ os:getpid() ++"/data/node" ++ N ++ "/"},
                     {"NODE", Name},
                     {"PORT", Port},
-                    {"DCOS", "true"},
                     {"PEER_PORT", PeerPort}],
              Cmd = "../../../cluster/rel/vonnegut/bin/vonnegut console",
              Pid = cmd("node" ++ N, Cmd, Env),

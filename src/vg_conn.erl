@@ -33,7 +33,7 @@ acceptor_init(_SockName, LSocket, []) ->
     {ok, MRef}.
 
 acceptor_continue(_PeerName, Socket, MRef) ->
-    lager:info("new connection: ~p", [node()]),
+    lager:debug("at=new_connection node=~p peer=~p", [node(), _PeerName]),
     gen_server:enter_loop(?MODULE, [], #state{socket=Socket, ref=MRef, buffer = <<>>}).
 
 acceptor_terminate(Reason, _) ->
@@ -82,11 +82,9 @@ terminate(_, _) ->
 %% else return the data to be kept in the buffer
 -spec handle_data(binary(), inets:socket()) -> binary().
 handle_data(<<Size:32/signed, Message:Size/binary, Rest/binary>>, Socket) ->
-    lager:info("~p got data ~p", [node(), Message]),
     handle_request(Message, Socket),
     Rest;
 handle_data(Data, _Socket) ->
-    lager:info("~p got data ~p", [node(), Data]),
     Data.
 
 %% Parse out the type of request (apikey) and the request data
@@ -112,7 +110,6 @@ handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
 handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
     Results = [{Topic, [begin
-                            lager:info("writing a thing ~p ~p", [node(), Topic]),
                             {ok, Offset} = vg_active_segment:write(Topic, Partition, MessageSet),
                             {Partition, ?NONE_ERROR, Offset}
                         end || {Partition, MessageSet} <- PartitionData]}
@@ -121,9 +118,8 @@ handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
     Size = erlang:iolist_size(ProduceResponse) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ProduceResponse]);
 handle_request(?TOPICS_REQUEST, <<>>, CorrelationId, Socket) ->
-    Children0 = supervisor:which_children(vonnegut_sup),
-    Children = [Partition || {Partition, _, _, [C]} <- supervisor:which_children(vonnegut_sup), C == vg_topic_sup],
-    lager:info("kids ~p ~p", [Children0, Children]),
+    Children = [Partition || {Partition, _, _, [C]} <- supervisor:which_children(vonnegut_sup),
+                             C == vg_topic_sup],
     Topics = [vg_protocol:encode_string(T) || T <- Children],
     Response = vg_protocol:encode_array(Topics),
     Size = erlang:iolist_size(Response) + 4,

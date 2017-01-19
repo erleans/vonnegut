@@ -45,10 +45,9 @@ write(Topic, Partition, MessageSet) ->
     %% clear that this is the right place for this
     try
         gen_server:call(?SERVER(Topic, Partition), {write, MessageSet})
-    catch C:E ->
-            lager:warning("~p:~p write to nonexistent topic '~s', creating", [C, E, Topic]),
+    catch _:{noproc, _} ->
+            lager:warning("write to nonexistent topic '~s', creating", [Topic]),
             {ok, _} = vonnegut_sup:create_topic(Topic),
-            lager:warning("created"),
             write(Topic, Partition, MessageSet)
     end.
 
@@ -58,8 +57,8 @@ write(Sender, Topic, Partition, MessageSet) ->
     %% clear that this is the right place for this
     try
         gen_server:call(?SERVER(Topic, Partition), {write, Sender, MessageSet})
-    catch C:E ->
-            lager:warning("~p:~p sender write to nonexistent topic '~s', creating", [C, E, Topic]),
+    catch _:{noproc, _} ->
+            lager:warning("sender write to nonexistent topic '~s', creating", [Topic]),
             {ok, _} = vonnegut_sup:create_topic(Topic),
             write(Sender, Topic, Partition, MessageSet)
     end.
@@ -82,8 +81,6 @@ init([Topic, Partition, NextServer, Tab]) ->
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
-    lager:info("starting seg mgr next ~p", [NextServer]),
-
     %% Trigger server start on next server
     NextBrick =
         case NextServer of
@@ -91,17 +88,15 @@ init([Topic, Partition, NextServer, Tab]) ->
             tail -> tail;
             last -> last;
             S when is_atom(S) ->
+                lager:info("at=segment_chain_init topic=~p partition=~p next=~p", [Topic, Partition, NextServer]),
                 {ok, SupPid} = vonnegut_sup:create_topic(S, Topic, [Partition]),
                 Children = supervisor:which_children(SupPid),
-                lager:info("more kids! ~p", [Children]),
                 [{_, Pid, _, _}] = lists:filter(fun({{T, P}, _, _, _}) ->
                                                         T == Topic andalso P == Partition;
                                                    (_) -> false
                                                 end, Children),
                 Pid
         end,
-
-    lager:info("through: ~p", [NextBrick]),
 
     {ok, #state{id=Id,
                 next_brick=NextBrick,
@@ -122,45 +117,36 @@ handle_call({write, MessageSet}, _From, State=#state{topic=_Topic,
                                                      partition=_Partition,
                                                      next_brick=NextBrick}) ->
     {FirstID, State1} = write_message_set(MessageSet, State),
-    lager:info("~p XXNEXT ~p", [node(), NextBrick]),
     case NextBrick of
         solo -> ok;
         tail -> ok;
         last -> ok;
         _ ->
-            %% this will be a bottleneck, but OK for now
-            %% does gproc's via work on remote nodes?
-            R = gen_server:cast(NextBrick,
-                                {write, self(), MessageSet}),
-            lager:info("ret ~p ~p", [nodes(), R])
+            gen_server:cast(NextBrick, {write, self(), MessageSet})
     end,
     {reply, {ok, FirstID}, State1};
 handle_call(_Msg, _From, State) ->
+    lager:info("bad call ~p ~p", [_Msg, _From]),
     {noreply, State}.
-
 
 handle_cast({write, Sender, MessageSet}, State=#state{topic=_Topic,
                                                       partition=_Partition,
                                                       next_brick=NextBrick}) ->
     {_FirstID, State1} = write_message_set(MessageSet, State),
-    lager:info("~p YYNEXT ~p", [node(), NextBrick]),
     case NextBrick of
         solo -> ok;
         tail -> ok;
         last -> ok;
         _ ->
-            %% this will be a bottleneck, but OK for now
-            %% does gproc's via work on remote nodes?
-            gen_server:cast(NextBrick,
-                            {write, self(), MessageSet})
+            gen_server:cast(NextBrick, {write, self(), MessageSet})
     end,
 
-    %% batch acks later
+    %% TODO: batch acks
     Sender ! {ack, State1#state.id},
 
     {noreply, State1};
 handle_cast(_Msg, State) ->
-    lager:info("bad cast ~p ~p", [node(), _Msg]),
+    lager:info("bad cast ~p", [_Msg]),
     {noreply, State}.
 
 handle_info({ack, ID}, State) ->

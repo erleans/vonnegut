@@ -39,11 +39,6 @@ handle_call(next, _From, State = #state{next_node = Next}) ->
 handle_call(_, _From, State) ->
     {noreply, State}.
 
-handle_cast({route_write, Sender, Topic, Partition, MessageSet}, State) ->
-    %% this actually goes to a vg_active_segment process
-    lager:info("routing write from ~p to ~p ~p", [Sender, Topic, Partition]),
-    ok = vg_active_segment:write(Sender, Topic, Partition, MessageSet),
-    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -142,8 +137,7 @@ join() ->
                   end,
 
     NewNodes = lookup(ClusterType),
-    R = ordsets:fold(fun(Node, _) -> vg_peer_service:join(Node) end, ok, NewNodes),
-    lager:info("join results: ~p", [R]),
+    ordsets:fold(fun(Node, _) -> vg_peer_service:join(Node) end, ok, NewNodes),
     [list_to_atom(atom_to_list(Name)++"@"++Host) || {Name, Host, _Port} <- NewNodes].
 
 %% leave() ->

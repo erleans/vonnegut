@@ -28,13 +28,7 @@ start_link(Topic, Partitions) ->
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([Topic, Partitions]) ->
-    lager:info(" starting topic sup ~p ~p ~p", [node(), Topic, Partitions]),
-    ChildSpecs0 = [begin
-                       lager:info("creating child spec for: ~p", [Partition]),
-                       child_specs(Topic, Partition)
-                   end || Partition <- Partitions],
-    lager:info("child specs ~p", [ChildSpecs0]),
-    ChildSpecs = lists:flatten(ChildSpecs0), %% [child_specs(Topic, Partition) || Partition <- Partitions]),
+    ChildSpecs = lists:flatten([child_specs(Topic, Partition) || Partition <- Partitions]),
     {ok, {{one_for_one, 0, 1}, ChildSpecs}}.
 
 %%====================================================================

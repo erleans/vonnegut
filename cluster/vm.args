@@ -5,4 +5,4 @@
 +A 100
 +K true
 
--partisan peer_port $PEER_PORT
+-partisan peer_port ${PEER_PORT}
