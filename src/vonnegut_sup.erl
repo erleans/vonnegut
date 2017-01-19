@@ -9,7 +9,9 @@
 
 %% API
 -export([start_link/0,
-         create_topic/1]).
+         create_topic/1,
+         create_topic/2,
+         create_topic/3]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -24,7 +26,20 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 create_topic(Topic) ->
-    supervisor:start_child(?SERVER, topic_childspec(Topic, [0])).
+    create_topic(Topic, [0]).
+
+create_topic(Topic, Partitions) ->
+    create_topic(local, Topic, Partitions).
+
+create_topic(Server0, Topic, Partitions) ->
+    Server =
+        case Server0 of
+            local -> ?SERVER;
+            _ -> {?SERVER, Server0}
+        end,
+    lager:info("at=create_topic node=~p topic=~p partitions=~p target=~p",
+               [node(), Topic, Partitions, Server0]),
+    supervisor:start_child(Server, topic_childspec(Topic, Partitions)).
 
 %%====================================================================
 %% Supervisor callbacks

@@ -33,6 +33,7 @@ acceptor_init(_SockName, LSocket, []) ->
     {ok, MRef}.
 
 acceptor_continue(_PeerName, Socket, MRef) ->
+    lager:debug("at=new_connection node=~p peer=~p", [node(), _PeerName]),
     gen_server:enter_loop(?MODULE, [], #state{socket=Socket, ref=MRef, buffer = <<>>}).
 
 acceptor_terminate(Reason, _) ->
@@ -115,7 +116,14 @@ handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
               || {Topic, PartitionData} <- TopicData],
     ProduceResponse = vg_protocol:encode_produce_response(Results),
     Size = erlang:iolist_size(ProduceResponse) + 4,
-    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ProduceResponse]).
+    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ProduceResponse]);
+handle_request(?TOPICS_REQUEST, <<>>, CorrelationId, Socket) ->
+    Children = [Partition || {Partition, _, _, [C]} <- supervisor:which_children(vonnegut_sup),
+                             C == vg_topic_sup],
+    Topics = [vg_protocol:encode_string(T) || T <- Children],
+    Response = vg_protocol:encode_array(Topics),
+    Size = erlang:iolist_size(Response) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]).
 
 -spec decode_topic(binary()) -> {topic_partition(), binary()}.
 decode_topic(<<Size:32/signed, Topic:Size/binary, PartitionsRaw/binary>>) ->

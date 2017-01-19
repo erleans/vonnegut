@@ -37,8 +37,10 @@ init([Topic, Partitions]) ->
 
 child_specs(Topic, Partition) ->
     vg_log_segments:load_all(Topic, Partition),
+    %% wait for the chain to be active?
+    Next = vg_chain_state:next(),
     [#{id      => {Topic, Partition},
-       start   => {vg_active_segment, start_link, [Topic, Partition, last]},
+       start   => {vg_active_segment, start_link, [Topic, Partition, Next]},
        restart => permanent,
        type    => worker} |
      case application:get_env(vonnegut, log_cleaner, true) of

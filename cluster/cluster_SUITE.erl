@@ -8,33 +8,44 @@
 suite() ->
     [{timetrap,{minutes,30}}].
 
-dont_init_per_suite(Config) ->
+init_per_suite(Config) ->
+    lager:start(),
     %% make a release as test, should likely use better exit status
     %% stuff rather than assuming that it passes
     %% lager:info("~p", [os:cmd("pwd")]),
-    0 = sync_cmd("release", "/bin/bash -c '(cd ../../../..; pwd; rebar3 release)'", []),
+    0 = sync_cmd("release", "/bin/bash -c '(cd ../../../..; pwd; rebar3 as cluster release)'", []),
+
+    %% make sure that the test runner has access to the env vars
+    application:load(vonnegut),
 
     %% start several nodes
     Nodes =
         [begin
              %% fix the names to use the discovery stuff?
              N = integer_to_list(N0),
-             Name = "node" ++ N ++ "@127.0.0.1",
-             Port = integer_to_list(5554 + N0),
+             Name = "chain1-" ++ N ++ "@127.0.0.1",
+             ct:pal("N ~p ~p", [N, N0]),
+             Port = integer_to_list(5555 + N0),
+             PeerPort = integer_to_list(15555 + N0),
              Env = [{"RELX_REPLACE_OS_VARS", "true"},
+                    {"LOG_DIR", "/tmp/vg-s"++ os:getpid() ++"/data/node" ++ N ++ "/"},
                     {"NODE", Name},
-                    {"PORT", Port}],
-             Cmd = "../../../default/rel/vonnegut/bin/vonnegut console",
+                    {"PORT", Port},
+                    {"PEER_PORT", PeerPort}],
+             Cmd = "../../../cluster/rel/vonnegut/bin/vonnegut console",
              Pid = cmd("node" ++ N, Cmd, Env),
              ct:pal("cmd ~p ~p", [Cmd, Env]),
              timer:sleep(1000),
              {Pid, list_to_atom(Name)}
          end
-         || N0 <- lists:seq(1, 3)],
+         || N0 <- lists:seq(0, 2)],
 
     %% Collect pids here (actually, using console + cmd() we don't
     %% need to, because console will exit when the testrunner exits).
     ct:pal("ps ~p", [os:cmd("ps aux | grep beam.sm[p]")]),
+
+    %% give everything a bit to come up? TODO: proper wait
+    timer:sleep(5000),
 
     %% establish disterl connections to each of them
     NodeName = 'testrunner@127.0.0.1',
@@ -47,7 +58,7 @@ dont_init_per_suite(Config) ->
      || {_Pid1, Node} <- Nodes],
     [{nodes, Nodes}|Config].
 
-dont_end_per_suite(Config) ->
+end_per_suite(Config) ->
     Nodes = ?config(nodes, Config),
     [begin
          rpc:call(Node, erlang, halt, [0])
@@ -75,9 +86,17 @@ end_per_group(_GroupName, Config) ->
     Config.
 
 init_per_testcase(_TestCase, Config) ->
+    application:load(vonnegut),
+    %% ct:pal("envs: ~p", [application:get_all_env(vonnegut)]),
+    application:start(shackle),
+    ok = vg_client_pool:start(),
+    timer:sleep(3000),
     Config.
 
 end_per_testcase(_TestCase, Config) ->
+    application:unload(vonnegut),
+    ok = vg_client_pool:stop(),
+    application:stop(shackle),
     Config.
 
 groups() ->
@@ -85,7 +104,7 @@ groups() ->
      {init,
       [],
       [
-       %bootstrap
+       bootstrap
       ]},
      {operations,
       [],
@@ -100,20 +119,20 @@ groups() ->
 
 all() ->
     [
-     nop
-     %{group, init} %,
+     {group, init} %,
      %% {group, operations}
     ].
 
+%% test that the cluster is up and can do an end-to-end write/read cycle
 bootstrap(Config) ->
-    application:start(shackle),
-    do(vg, create_topic, [<<"foo">>]),
-    ok = vg_client_pool:start(),
+    %% just create topics when written to for now
+    %% do(vg, create_topic, [<<"foo">>]),
     R = vg_client:produce(<<"foo">>, <<"bar">>),
-    _R = vg_client:fetch(<<"foo">>),
-    ct:pal("r ~p", [R]),
-    timer:sleep(200),
-    ?assertMatch(foo, R),
+    timer:sleep(800),
+    R1 = vg_client:fetch(<<"foo">>),
+    ct:pal("r ~p ~p", [R, R1]),
+    timer:sleep(1800),
+    ?assertMatch(#{message_set := [<<"bar">>]}, R1),
     Config.
 
 %% start_predefined(Config) ->

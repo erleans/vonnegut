@@ -13,18 +13,22 @@ init_per_suite(Config) ->
     application:load(vonnegut),
     application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
     {ok, _} = application:ensure_all_started(vonnegut),
-    ok = vg_client_pool:start(),
     Config.
 
 end_per_suite(Config) ->
-    vg_client_pool:stop(),
     application:stop(vonnegut),
     Config.
 
 init_per_testcase(_, Config) ->
+    ok = vg_client_pool:start(),
     Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
     vg:create_topic(Topic),
     [{topic, Topic} | Config].
+
+end_per_testcase(_, Config) ->
+    vg_client_pool:stop(),
+    Config.
+
 
 creation(_Config) ->
     Topic = vg_test_utils:create_random_name(<<"creation_test_topic">>),

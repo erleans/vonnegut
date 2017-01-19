@@ -2,7 +2,8 @@
 
 -behaviour(gen_server).
 
--export([start_link/0]).
+-export([start_link/0,
+         next/0]).
 
 -export([init/1,
          handle_call/3,
@@ -25,11 +26,16 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+next() ->
+    gen_server:call(?SERVER, next).
+
 init([]) ->
     Replicas = list_to_integer(application:get_env(vonnegut, replicas, "1")),
     {ok, #state{replicas=Replicas,
                 active=false}, 0}.
 
+handle_call(next, _From, State = #state{next_node = Next}) ->
+    {reply, Next, State};
 handle_call(_, _From, State) ->
     {noreply, State}.
 
@@ -45,6 +51,7 @@ handle_info(timeout, State=#state{replicas=Replicas}) ->
     lager:info("at=chain_join role=~s next_node=~p members=~p", [Role, NextNode, Members]),
 
     {ok, CurrentMembers} = vg_peer_service:members(),
+    _ = [net_adm:ping(Member) || Member <- CurrentMembers],
     case length(CurrentMembers) of
         Replicas ->
             lager:info("at=chain_complete requested_size=~p", [Replicas]),
@@ -57,11 +64,12 @@ handle_info(timeout, State=#state{replicas=Replicas}) ->
             {noreply, State#state{members=Members,
                                   role=Role,
                                   next_node=NextNode,
-                                  active=false}, 100}
+                                  active=false}, 200}
     end;
 handle_info({next_node_down, NextNode}, State) ->
+    %% is this the right place to do this?
     lager:info("next_node_down=~p", [NextNode]),
-    {noreply, State}.
+    {noreply, State#state{active = false}}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -130,7 +138,7 @@ join() ->
 
     NewNodes = lookup(ClusterType),
     ordsets:fold(fun(Node, _) -> vg_peer_service:join(Node) end, ok, NewNodes),
-    NewNodes.
+    [list_to_atom(atom_to_list(Name)++"@"++Host) || {Name, Host, _Port} <- NewNodes].
 
 %% leave() ->
 %%     vg_peer_service:leave([]).

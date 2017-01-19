@@ -4,7 +4,7 @@
 -behaviour(gen_server).
 
 -export([start_link/3,
-         write/3,
+         write/3, write/4,
          ack/3]).
 
 -export([init/1,
@@ -41,12 +41,32 @@ start_link(Topic, Partition, NextBrick) ->
     gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick, Tab], []).
 
 write(Topic, Partition, MessageSet) ->
-    gen_server:call(?SERVER(Topic, Partition), {write, MessageSet}).
+    %% there clearly needs to be a lot more logic here.  it's also not
+    %% clear that this is the right place for this
+    try
+        gen_server:call(?SERVER(Topic, Partition), {write, MessageSet})
+    catch _:{noproc, _} ->
+            lager:warning("write to nonexistent topic '~s', creating", [Topic]),
+            {ok, _} = vonnegut_sup:create_topic(Topic),
+            write(Topic, Partition, MessageSet)
+    end.
+
+%% TODO: clean up the duplication from all this
+write(Sender, Topic, Partition, MessageSet) ->
+    %% there clearly needs to be a lot more logic here.  it's also not
+    %% clear that this is the right place for this
+    try
+        gen_server:call(?SERVER(Topic, Partition), {write, Sender, MessageSet})
+    catch _:{noproc, _} ->
+            lager:warning("sender write to nonexistent topic '~s', creating", [Topic]),
+            {ok, _} = vonnegut_sup:create_topic(Topic),
+            write(Sender, Topic, Partition, MessageSet)
+    end.
 
 ack(Topic, Partition, LatestId) ->
     vg_pending_writes:ack(Topic, Partition, LatestId).
 
-init([Topic, Partition, NextBrick, Tab]) ->
+init([Topic, Partition, NextServer, Tab]) ->
     Config = setup_config(),
     Partition = 0,
     LogDir = Config#config.log_dir,
@@ -60,6 +80,23 @@ init([Topic, Partition, NextBrick, Tab]) ->
 
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
+
+    %% Trigger server start on next server
+    NextBrick =
+        case NextServer of
+            solo -> solo;
+            tail -> tail;
+            last -> last;
+            S when is_atom(S) ->
+                lager:info("at=segment_chain_init topic=~p partition=~p next=~p", [Topic, Partition, NextServer]),
+                {ok, SupPid} = vonnegut_sup:create_topic(S, Topic, [Partition]),
+                Children = supervisor:which_children(SupPid),
+                [{_, Pid, _, _}] = lists:filter(fun({{T, P}, _, _, _}) ->
+                                                        T == Topic andalso P == Partition;
+                                                   (_) -> false
+                                                end, Children),
+                Pid
+        end,
 
     {ok, #state{id=Id,
                 next_brick=NextBrick,
@@ -78,13 +115,43 @@ init([Topic, Partition, NextBrick, Tab]) ->
 
 handle_call({write, MessageSet}, _From, State=#state{topic=_Topic,
                                                      partition=_Partition,
-                                                     next_brick=_NextBrick}) ->
+                                                     next_brick=NextBrick}) ->
     {FirstID, State1} = write_message_set(MessageSet, State),
-    {reply, {ok, FirstID}, State1}.
-
-handle_cast(_Msg, State) ->
+    case NextBrick of
+        solo -> ok;
+        tail -> ok;
+        last -> ok;
+        _ ->
+            gen_server:cast(NextBrick, {write, self(), MessageSet})
+    end,
+    {reply, {ok, FirstID}, State1};
+handle_call(_Msg, _From, State) ->
+    lager:info("bad call ~p ~p", [_Msg, _From]),
     {noreply, State}.
 
+handle_cast({write, Sender, MessageSet}, State=#state{topic=_Topic,
+                                                      partition=_Partition,
+                                                      next_brick=NextBrick}) ->
+    {_FirstID, State1} = write_message_set(MessageSet, State),
+    case NextBrick of
+        solo -> ok;
+        tail -> ok;
+        last -> ok;
+        _ ->
+            gen_server:cast(NextBrick, {write, self(), MessageSet})
+    end,
+
+    %% TODO: batch acks
+    Sender ! {ack, State1#state.id},
+
+    {noreply, State1};
+handle_cast(_Msg, State) ->
+    lager:info("bad cast ~p", [_Msg]),
+    {noreply, State}.
+
+handle_info({ack, ID}, State) ->
+    ack(State#state.topic, State#state.partition, ID),
+    {noreply, State};
 handle_info(_, State) ->
     {noreply, State}.
 
