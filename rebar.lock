@@ -10,29 +10,16 @@
   1},
  {<<"lager">>,{pkg,<<"lager">>,<<"3.2.4">>},0},
  {<<"partisan">>,
-  {git,"https://github.com/lasp-lang/partisan.git",
-       {ref,"eb291f242b3245f57f95efd53c801473d4cbe9e1"}},
+  {git,"https://github.com/tsloughter/partisan.git",
+       {ref,"b306068f7fa340f54eecad3d218b311b49195900"}},
   0},
- {<<"ranch">>,
-  {git,"https://github.com/extend/ranch.git",
-       {ref,"a5d2efcde9a34ad38ab89a26d98ea5335e88625a"}},
-  1},
- {<<"rand_compat">>,
-  {git,"https://github.com/lasp-lang/rand_compat",
-       {ref,"b2cf40b6ef14a5d7fbc67276e9164de7cc7c7906"}},
-  1},
+ {<<"rand_compat">>,{pkg,<<"rand_compat">>,<<"0.0.1">>},1},
  {<<"shackle">>,
   {git,"https://github.com/lpgauth/shackle.git",
        {ref,"14c50629f285f25991ba4fb91177838701a7b815"}},
   0},
- {<<"time_compat">>,
-  {git,"https://github.com/lasp-lang/time_compat",
-       {ref,"6007f68892104ebb6fa2366cebf9d928d8856273"}},
-  1},
- {<<"types">>,
-  {git,"https://github.com/lasp-lang/types",
-       {ref,"da9f1c777e554d70360e9d3413eb4054756137ea"}},
-  1}]}.
+ {<<"time_compat">>,{pkg,<<"time_compat">>,<<"0.0.1">>},1},
+ {<<"types">>,{pkg,<<"types">>,<<"0.0.1">>},1}]}.
 [
 {pkg_hash,[
  {<<"acceptor_pool">>, <<"679D741DF87FC13599B1AEF2DF8F78F1F880449A6BEFAB7C44FB6FAE0E92A2DE">>},
@@ -40,5 +27,8 @@
  {<<"erlware_commons">>, <<"051BED79A34E66678C1CBEEBC7B66360C827D081A0C5E2528878011E31DDCDCA">>},
  {<<"goldrush">>, <<"F06E5D5F1277DA5C413E84D5A2924174182FB108DABB39D5EC548B27424CD106">>},
  {<<"gproc">>, <<"4579663E5677970758A05D8F65D13C3E9814EC707AD51D8DCEF7294EDA1A730C">>},
- {<<"lager">>, <<"A6DEB74DAE7927F46BD13255268308EF03EB206EC784A94EAF7C1C0F3B811615">>}]}
+ {<<"lager">>, <<"A6DEB74DAE7927F46BD13255268308EF03EB206EC784A94EAF7C1C0F3B811615">>},
+ {<<"rand_compat">>, <<"624B590931D27252D0BCF710211699DB3695540706F57D2E91B918A17AB58839">>},
+ {<<"time_compat">>, <<"23FE0AD1FDF3B5B88821B2D04B4B5E865BF587AE66056D671FE0F53514ED8139">>},
+ {<<"types">>, <<"0287428C7BCB1643E0C254295E67CEA89E5B9144603955CAC2699C7418A33B1A">>}]}
 ].
