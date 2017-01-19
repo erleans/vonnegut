@@ -18,6 +18,8 @@
          }).
 
 start() ->
+    %% maybe start this if it hasn't been
+    application:start(shackle),
     Cluster = get_cluster(),
     lager:info("cluster: ~p", [Cluster]),
     maybe_init_ets(),
@@ -30,7 +32,7 @@ start() ->
 
 start_pools(Chains) ->
     [begin
-         lager:info("starting chain: ~p", [Chain#chain.name]),
+         lager:info("starting chain: ~p", [Chain]),
          HeadName = make_pool_name(Chain#chain.name, write),
          start_pool(HeadName, #{ip => Chain#chain.head_host,
                             port => Chain#chain.head_port}),
@@ -57,22 +59,31 @@ refresh_topic_map() ->
     ets:insert(?topic_map, {<<>>, Chain1}).
 
 get_pool(Topic, RW) ->
+    get_pool(Topic, RW, first).
+
+get_pool(Topic, RW, Try) ->
     %% at some point we should handle retries here for when the topic
     %% list is being refreshed.
     case ets:lookup(?topic_map, Topic) of
         [] ->
-            case RW of
-                write ->
+            case {RW, Try} of
+                {write, _} ->
                     %% just make it up for now  TODO: make this a settable
                     %% behavior serverside
                     [{_, Default}] = ets:lookup(?topic_map, <<>>),
+                    lager:info("default pool: ~p ~p", [Topic, Default]),
                     {ok, make_pool_name(Default, RW)};
-                read ->
+                {read, first} ->
+                    refresh_topic_map(),
+                    get_pool(Topic, RW, second);
+                {read, second} ->
+                    lager:info("not found chain: ~p", [Topic]),
                     {error, not_found}
             end;
         %%{error, not_found};
         [{_, Chain}] ->
             Pool = make_pool_name(Chain, RW),
+            lager:info("found chain: ~p ~p", [Topic, Pool]),
             {ok, Pool}
     end.
 
@@ -141,7 +152,13 @@ raw_to_chains({direct, Nodes}) ->
     ParsedNodes = [parse_name(Node) || Node <- Nodes],
     Chains = ordsets:from_list([Chain || {Chain, _, _, _} <- ParsedNodes]),
     [make_chain(Chain, ParsedNodes)
-     || Chain <- Chains].
+     || Chain <- Chains];
+raw_to_chains(local) ->
+    [#chain{name = <<"local">>,
+            head_host = "127.0.0.1",
+            head_port = 5555,
+            tail_host = "127.0.0.1",
+            tail_port = 5555}].
 
 parse_name({Name0, Host, Port}) ->
     %% this especially is likely to cause problems if we allow

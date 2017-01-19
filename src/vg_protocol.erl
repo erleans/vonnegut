@@ -178,9 +178,8 @@ decode_topics_response(Msg) ->
     {Topics, _rest} = decode_array(fun decode_topics/1, Msg),
     Topics.
 
-decode_topics(Thing) ->
-    lager:info("decode a thing ~p", [Thing]),
-    {Thing, <<>>}.
+decode_topics(<<Size:32/signed, Topic:Size/bytes, Rest/binary>>) ->
+    {Topic, Rest}.
 
 decode_fetch_response(Msg) ->
     decode_fetch_response(Msg, resp_map()).

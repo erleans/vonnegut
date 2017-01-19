@@ -14,11 +14,13 @@ init_per_testcase(_, Config) ->
     application:set_env(vonnegut, segment_bytes, 86),
     application:set_env(vonnegut, index_max_bytes, 18),
     application:set_env(vonnegut, index_interval_bytes, 24),
+    application:start(shackle),
     application:ensure_all_started(vonnegut),
     crypto:start(),
     Config.
 
 end_per_testcase(_, Config) ->
+    application:unload(vonnegut),
     Config.
 
 from_zero(_Config) ->
@@ -27,6 +29,10 @@ from_zero(_Config) ->
     TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
     ok = vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
+
+    %% make sure there's enough time for the
+    %% listeners to come up
+    timer:sleep(250),
 
     ok = vg_client_pool:start(),
     ?assertMatch(#{topic := Topic, offset := 0},

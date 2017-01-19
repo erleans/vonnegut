@@ -14,7 +14,10 @@ join(Node) ->
     Host1 = string:tokens(Host, "."),
     HostIP0 = [list_to_integer(Octet) || Octet <- Host1],
     HostIP = list_to_tuple(HostIP0),
-    partisan_peer_service:join({Name, HostIP, Port}, true).
+    %% this assumption of correlation is bad and we should fix; need a
+    %% better to do sys.config variations...
+    application:set_env(partisan, peer_port, Port + 10000),
+    partisan_peer_service:join({Name, HostIP, Port + 10000}, true).
 
 leave() ->
     partisan_peer_service:leave([]).

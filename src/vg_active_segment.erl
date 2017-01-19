@@ -4,7 +4,7 @@
 -behaviour(gen_server).
 
 -export([start_link/3,
-         write/3,
+         write/3, write/4,
          ack/3]).
 
 -export([init/1,
@@ -41,12 +41,33 @@ start_link(Topic, Partition, NextBrick) ->
     gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick, Tab], []).
 
 write(Topic, Partition, MessageSet) ->
-    gen_server:call(?SERVER(Topic, Partition), {write, MessageSet}).
+    %% there clearly needs to be a lot more logic here.  it's also not
+    %% clear that this is the right place for this
+    try
+        gen_server:call(?SERVER(Topic, Partition), {write, MessageSet})
+    catch C:E ->
+            lager:warning("~p:~p write to nonexistent topic '~s', creating", [C, E, Topic]),
+            {ok, _} = vonnegut_sup:create_topic(Topic),
+            lager:warning("created"),
+            write(Topic, Partition, MessageSet)
+    end.
+
+%% TODO: clean up the duplication from all this
+write(Sender, Topic, Partition, MessageSet) ->
+    %% there clearly needs to be a lot more logic here.  it's also not
+    %% clear that this is the right place for this
+    try
+        gen_server:call(?SERVER(Topic, Partition), {write, Sender, MessageSet})
+    catch C:E ->
+            lager:warning("~p:~p sender write to nonexistent topic '~s', creating", [C, E, Topic]),
+            {ok, _} = vonnegut_sup:create_topic(Topic),
+            write(Sender, Topic, Partition, MessageSet)
+    end.
 
 ack(Topic, Partition, LatestId) ->
     vg_pending_writes:ack(Topic, Partition, LatestId).
 
-init([Topic, Partition, NextBrick, Tab]) ->
+init([Topic, Partition, NextServer, Tab]) ->
     Config = setup_config(),
     Partition = 0,
     LogDir = Config#config.log_dir,
@@ -60,6 +81,27 @@ init([Topic, Partition, NextBrick, Tab]) ->
 
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
+
+    lager:info("starting seg mgr next ~p", [NextServer]),
+
+    %% Trigger server start on next server
+    NextBrick =
+        case NextServer of
+            solo -> solo;
+            tail -> tail;
+            last -> last;
+            S when is_atom(S) ->
+                {ok, SupPid} = vonnegut_sup:create_topic(S, Topic, [Partition]),
+                Children = supervisor:which_children(SupPid),
+                lager:info("more kids! ~p", [Children]),
+                [{_, Pid, _, _}] = lists:filter(fun({{T, P}, _, _, _}) ->
+                                                        T == Topic andalso P == Partition;
+                                                   (_) -> false
+                                                end, Children),
+                Pid
+        end,
+
+    lager:info("through: ~p", [NextBrick]),
 
     {ok, #state{id=Id,
                 next_brick=NextBrick,
@@ -78,13 +120,52 @@ init([Topic, Partition, NextBrick, Tab]) ->
 
 handle_call({write, MessageSet}, _From, State=#state{topic=_Topic,
                                                      partition=_Partition,
-                                                     next_brick=_NextBrick}) ->
+                                                     next_brick=NextBrick}) ->
     {FirstID, State1} = write_message_set(MessageSet, State),
-    {reply, {ok, FirstID}, State1}.
-
-handle_cast(_Msg, State) ->
+    lager:info("~p XXNEXT ~p", [node(), NextBrick]),
+    case NextBrick of
+        solo -> ok;
+        tail -> ok;
+        last -> ok;
+        _ ->
+            %% this will be a bottleneck, but OK for now
+            %% does gproc's via work on remote nodes?
+            R = gen_server:cast(NextBrick,
+                                {write, self(), MessageSet}),
+            lager:info("ret ~p ~p", [nodes(), R])
+    end,
+    {reply, {ok, FirstID}, State1};
+handle_call(_Msg, _From, State) ->
     {noreply, State}.
 
+
+handle_cast({write, Sender, MessageSet}, State=#state{topic=_Topic,
+                                                      partition=_Partition,
+                                                      next_brick=NextBrick}) ->
+    {_FirstID, State1} = write_message_set(MessageSet, State),
+    lager:info("~p YYNEXT ~p", [node(), NextBrick]),
+    case NextBrick of
+        solo -> ok;
+        tail -> ok;
+        last -> ok;
+        _ ->
+            %% this will be a bottleneck, but OK for now
+            %% does gproc's via work on remote nodes?
+            gen_server:cast(NextBrick,
+                            {write, self(), MessageSet})
+    end,
+
+    %% batch acks later
+    Sender ! {ack, State1#state.id},
+
+    {noreply, State1};
+handle_cast(_Msg, State) ->
+    lager:info("bad cast ~p ~p", [node(), _Msg]),
+    {noreply, State}.
+
+handle_info({ack, ID}, State) ->
+    ack(State#state.topic, State#state.partition, ID),
+    {noreply, State};
 handle_info(_, State) ->
     {noreply, State}.
 

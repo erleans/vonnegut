@@ -28,4 +28,5 @@ stages:
             set -exu
 
             rebar3 do dialyzer, xref, ct, cover
+            rebar3 cluster # integrate with cover somehow?
             rebar3 coveralls send

@@ -1,0 +1,8 @@
+-name ${NODE}
+
+-setcookie vonnegut
+
++A 100
++K true
+
+-partisan peer_port $PEER_PORT
