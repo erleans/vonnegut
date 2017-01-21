@@ -1,26 +1,22 @@
 version: 2
 executorType: docker
 containerInfo:
-  - image: erlang:19.2
+  - image: tsloughter/erlang-git:19.2
     cmd: ["/bin/bash"]
 stages:
   build:
     workDir: ~/vonnegut
     steps:
-      - type: shell
-        name: Initialize Working Directory
-        pwd: /
-        command: |
-          mkdir /root/vonnegut
-
-      - type: shell
-        shell: /bin/bash
-        command: |
-            set -exu
-            apt-get update
-            apt-get install -y git
-
       - type: checkout
+
+      - type: cache-restore
+        key: vonnegut-{{ .Branch }}-{{ checksum "rebar.lock" }}
+
+      - type: cache-restore
+        key: erlang-plt-19.2
+
+      - type: cache-restore
+        key: hex-packages
 
       - type: shell
         shell: /bin/bash
@@ -30,3 +26,26 @@ stages:
             rebar3 do dialyzer, xref, ct, cover
             rebar3 cluster # integrate with cover somehow?
             rebar3 coveralls send
+
+      - type: test-results-store
+        path: ~/vonnegut/_build/test/logs/
+
+      - type: artifacts-store
+        path: ~/vonnegut/_build/test/logs
+        destination: common_test
+
+      - type: cache-save
+        key: vonnegut-{{ .Branch }}-{{ checksum "rebar.lock" }}
+        paths:
+          - ~/vonnegut/_build/default/lib
+          - ~/vonnegut/_build/default/plugins
+
+      - type: cache-save
+        key: erlang-plt-19.2
+        paths:
+          - ~/.cache/rebar3/rebar3_19.2_plt
+
+      - type: cache-save
+        key: hex-packages
+        paths:
+          - ~/.cache/rebar3/hex/default/packages
