@@ -81,20 +81,28 @@ terminate(_, _) ->
 %% If a message can be fully read from the data then handle the request
 %% else return the data to be kept in the buffer
 -spec handle_data(binary(), inets:socket()) -> binary().
-handle_data(<<Size:32/signed, Message:Size/binary, Rest/binary>>, Socket) ->
+handle_data(<<Size:32/signed-integer, Message:Size/binary, Rest/binary>>, Socket) ->
     handle_request(Message, Socket),
     Rest;
 handle_data(Data, _Socket) ->
     Data.
 
 %% Parse out the type of request (apikey) and the request data
-handle_request(<<ApiKey:16/signed, _ApiVersion:16/signed, CorrelationId:32/signed,
-                 ClientIdSize:32/signed, _ClientId:ClientIdSize/binary, Request/binary>>, Socket) ->
+handle_request(<<ApiKey:16/signed-integer, _ApiVersion:16/signed-integer, CorrelationId:32/signed-integer,
+                 ClientIdSize:16/signed-integer, _ClientId:ClientIdSize/binary, Request/binary>>, Socket) ->
     More = handle_request(ApiKey, Request, CorrelationId, Socket),
     More.
 
-handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
-                                 _MinBytes:32/signed, Rest/binary>>, CorrelationId, Socket) ->
+handle_request(?METADATA_REQUEST, Data, CorrelationId, Socket) ->
+    Topics = vg_protocol:decode_metadata_request(Data),
+    %% need to return all nodes and start giving nodes an integer id
+    Brokers = [{0, <<"localhost">>, 5555}],
+    TopicMetadata = [[{0, Topic, [{0, 0, 0, [], []}]}] || Topic <- Topics],
+    Response = vg_protocol:encode_metadata_response(Brokers, TopicMetadata),
+    Size = erlang:iolist_size(Response) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, Response]);
+handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/signed-integer,
+                                 _MinBytes:32/signed-integer, Rest/binary>>, CorrelationId, Socket) ->
     {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
     {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
 
@@ -102,7 +110,11 @@ handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
         Bytes = filelib:file_size(File) - Position,
-        gen_tcp:send(Socket, <<(Bytes + 4):32/signed, CorrelationId:32/signed>>),
+        ErrorCode = 0,
+        HighWaterMark = 0,
+        Response = vg_protocol:encode_fetch_response(Topic, Partition, ErrorCode, HighWaterMark, Bytes),
+        gen_tcp:send(Socket, [<<(Bytes + 4 + iolist_size(Response)):32/signed-integer,
+                                CorrelationId:32/signed-integer>>, Response]),
         {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, [])
     after
         file:close(Fd)
@@ -116,22 +128,22 @@ handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
               || {Topic, PartitionData} <- TopicData],
     ProduceResponse = vg_protocol:encode_produce_response(Results),
     Size = erlang:iolist_size(ProduceResponse) + 4,
-    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ProduceResponse]);
+    gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, ProduceResponse]);
 handle_request(?TOPICS_REQUEST, <<>>, CorrelationId, Socket) ->
     Children = [Partition || {Partition, _, _, [C]} <- supervisor:which_children(vonnegut_sup),
                              C == vg_topic_sup],
     Topics = [vg_protocol:encode_string(T) || T <- Children],
     Response = vg_protocol:encode_array(Topics),
     Size = erlang:iolist_size(Response) + 4,
-    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]).
+    gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, Response]).
 
 -spec decode_topic(binary()) -> {topic_partition(), binary()}.
-decode_topic(<<Size:32/signed, Topic:Size/binary, PartitionsRaw/binary>>) ->
+decode_topic(<<Size:16/signed-integer, Topic:Size/binary, PartitionsRaw/binary>>) ->
     {Partitions, Rest} = vg_protocol:decode_array(fun decode_partition/1, PartitionsRaw),
     {{Topic, Partitions}, Rest}.
 
 -spec decode_partition(binary()) -> {partition(), binary()}.
-decode_partition(<<Partition:32/signed, FetchOffset:64/signed, MaxBytes:32/signed, Rest/binary>>) ->
+decode_partition(<<Partition:32/signed-integer, FetchOffset:64/signed-integer, MaxBytes:32/signed-integer, Rest/binary>>) ->
     {{Partition, FetchOffset, MaxBytes}, Rest}.
 
 %%

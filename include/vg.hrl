@@ -8,6 +8,7 @@
 
 -define(PRODUCE_REQUEST, 0).
 -define(FETCH_REQUEST, 1).
+-define(METADATA_REQUEST, 3).
 
 %% non-kafka extension
 -define(TOPICS_REQUEST, 1000).
