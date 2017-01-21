@@ -8,6 +8,7 @@
          encode_message/2,
          encode_string/1,
          encode_bytes/1,
+         encode_fetch_response/1,
          encode_produce_response/1,
 
          decode_array/2,
@@ -97,6 +98,18 @@ encode_kv(Value) ->
     [encode_bytes(undefined), encode_bytes(Value)].
 
 %% encode responses
+
+encode_fetch_response(TopicPartitions) ->
+    encode_fetch_response(TopicPartitions, []).
+
+encode_fetch_response([], Acc) ->
+    encode_array(Acc);
+encode_fetch_response([{Topic, Partitions} | T], Acc) ->
+    encode_fetch_response(T, [[encode_string(Topic), encode_fetch_response_partitions(Partitions)] | Acc]).
+
+encode_fetch_response_partitions(Partitions) ->
+    encode_array([<<Partition:32/signed, ErrorCode:16/signed, Offset:64/signed>>
+                     || {Partition, ErrorCode, Offset} <- Partitions]).
 
 encode_produce_response(TopicPartitions) ->
     encode_produce_response(TopicPartitions, []).
@@ -202,9 +215,11 @@ decode_fetch_response(Data, Acc) ->
 
 resp_map() ->
     %% there are a number of fields that we're not including currently:
+    %% QUESTION: should there be one of these per partition?
     %% - throttle time
     %% - partition
     %% - message set size
     %% - topic name
     #{high_water_mark => 0,
+      error_code => 0,
       message_set => []}.

@@ -109,6 +109,7 @@ groups() ->
      {operations,
       [],
       [
+       roles
        %% start_predefined
        %% start_dynamic
        %% terminate_dynamic
@@ -119,8 +120,8 @@ groups() ->
 
 all() ->
     [
-     {group, init} %,
-     %% {group, operations}
+     {group, init},
+     {group, operations}
     ].
 
 %% test that the cluster is up and can do an end-to-end write/read cycle
@@ -135,10 +136,28 @@ bootstrap(Config) ->
     ?assertMatch(#{message_set := [<<"bar">>]}, R1),
     Config.
 
-%% start_predefined(Config) ->
-%%     Config.
+roles(Config) ->
+    %% write some stuff to have something to read.
+    [vg_client:produce(<<"foo">>, <<"bar", (integer_to_binary(N))/binary>>)
+     || N <- lists:seq(1, 20)],
+    timer:sleep(800),
+     vg_client:fetch(<<"foo">>),
 
-%%% utils
+    %% try to do a read on the head
+    R = shackle:call(chain1_head, {fetch, <<"foo">>, 0, 12}),
+    ct:pal("R ~p", [R]),
+    timer:sleep(1000),
+    ?assertMatch(#{error_code := 129}, R),
+
+    %% try to do a write on the tail
+    R1 =  shackle:call(chain1_tail, {produce, <<"foo">>, 0, [<<"bar3000">>, <<"barn_owl">>]}),
+    ?assertMatch(#{error_code := 131}, R1),
+
+    %% try to connect the middle of the chain
+    ?assertMatch({error, shiiiit},
+                 vg_client_pool:start_pool(middle_end, #{ip => "127.0.0.1", port => 5556})),
+    Config.
+
 
 sync_cmd(Name, Cmd, Env) ->
     P = open_port({spawn, Cmd},
@@ -182,3 +201,5 @@ do(M, F, A) ->
 
 nop(Config) ->
     Config.
+
+

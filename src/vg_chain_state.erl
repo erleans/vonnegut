@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0,
+         role/0,
          next/0]).
 
 -export([init/1,
@@ -29,6 +30,9 @@ start_link() ->
 next() ->
     gen_server:call(?SERVER, next).
 
+role() ->
+    gen_server:call(?SERVER, role).
+
 init([]) ->
     Replicas = list_to_integer(application:get_env(vonnegut, replicas, "1")),
     {ok, #state{replicas=Replicas,
@@ -36,6 +40,8 @@ init([]) ->
 
 handle_call(next, _From, State = #state{next_node = Next}) ->
     {reply, Next, State};
+handle_call(role, _From, State = #state{role = Role}) ->
+    {reply, Role, State};
 handle_call(_, _From, State) ->
     {noreply, State}.
 

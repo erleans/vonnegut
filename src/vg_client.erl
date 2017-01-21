@@ -51,7 +51,7 @@ merge_fetch_response(One, Two) ->
     #{message_set := Set1} = One,
     #{message_set := Set2} = Two,
     %% we assume ordering here, so Two's mark will be larger than
-    %% one's, and when we append we'll preserve ordering.
+    %% One's, and when we append we'll preserve ordering.
     Two#{message_set := lists:append(Set1, Set2)}.
 
 produce(Topic, RecordSet) ->
