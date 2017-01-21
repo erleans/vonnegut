@@ -34,4 +34,4 @@ get_metadata(_Config) ->
     {ok, {kpro_MetadataResponse,
           [{kpro_Broker,0,Host,Port}],
           [{kpro_TopicMetadata,no_error,Topic,
-            [{kpro_PartitionMetadata,no_error,Partition,0,[],[]}]}]}} = brod:get_metadata(Hosts).
+            [{kpro_PartitionMetadata,no_error,Partition,0,[],[]}]}| _]}} = brod:get_metadata(Hosts).

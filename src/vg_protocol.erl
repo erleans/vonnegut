@@ -164,7 +164,7 @@ decode_produce_request(<<Acks:16/signed-integer, Timeout:32/signed-integer, Topi
     {TopicsDecode, _} = decode_array(fun decode_produce_topics_request/1, Topics),
     {Acks, Timeout, TopicsDecode}.
 
-decode_produce_topics_request(<<Size:32/signed-integer, Topic:Size/binary, Rest/binary>>) ->
+decode_produce_topics_request(<<Size:16/signed-integer, Topic:Size/binary, Rest/binary>>) ->
     {TopicData, Rest1} = decode_array(fun decode_produce_partitions_request/1, Rest),
     {{Topic, TopicData}, Rest1}.
 
@@ -203,36 +203,53 @@ decode_produce_response_partitions(<<Partition:32/signed-integer, ErrorCode:16/s
     {{Partition, ErrorCode, Offset}, Rest}.
 
 decode_topics_response(Msg) ->
-    {Topics, _rest} = decode_array(fun decode_topics/1, Msg),
+    {Topics, _Rest} = decode_array(fun decode_topics/1, Msg),
     Topics.
 
 decode_topics(<<Size:16/signed-integer, Topic:Size/bytes, Rest/binary>>) ->
     {Topic, Rest}.
 
 decode_fetch_response(Msg) ->
-    decode_fetch_response(Msg, resp_map()).
+    case decode_array(fun decode_fetch_topic/1, Msg) of
+        %% TODO: unwrapping the topic here because we don't currently
+        %% handle multiple topics.  it might be easiest to roll this
+        %% up into a map of topics => responses rather than an array
+        {[Topic], _Rest} ->
+            Topic;
+        more -> more
+    end.
 
-decode_fetch_response(eof, Acc) ->
+decode_fetch_topic(<<Sz:16/signed-integer, Topic:Sz/binary, Partitions/binary>>) ->
+    case decode_array(fun decode_fetch_partition/1, Partitions) of
+        {DecPartitions, Rest} ->
+            {#{topic => Topic, partitions => DecPartitions}, Rest};
+        more -> more
+    end.
+
+decode_fetch_partition(<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
+                         HighWaterMark:64/signed-integer, Bytes:32/signed-integer, MessageSet:Bytes/bytes,
+                         Rest/binary>>) ->
+    %% there are a number of fields that we're not including currently:
+    %% - throttle time
+    %% - topic name
+    {decode_message_set(MessageSet,
+                        #{high_water_mark => HighWaterMark,
+                          partition => Partition,
+                          message_set_size => Bytes,
+                          error_code => ErrorCode,
+                          message_set => []
+                         }), Rest};
+decode_fetch_partition(_) ->
+    more.
+
+decode_message_set(End, Acc) when End =:= eof orelse End =:= <<>> ->
     #{message_set := Set} = Acc,
     Acc#{message_set := lists:reverse(Set)};
-decode_fetch_response(<<>>, Acc) ->
-    #{message_set := Set} = Acc,
-    Acc#{message_set := lists:reverse(Set)};
-decode_fetch_response(<<ID:64/signed-integer, _MessageSize:32/signed-integer, _CRC:32/signed-integer, ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer,
-                        -1:32/signed-integer, ValueSize:32/signed-integer, KV:ValueSize/binary, Rest/binary>>, Acc) ->
+decode_message_set(<<ID:64/signed-integer, _MessageSize:32/signed-integer, _CRC:32/signed-integer,
+                     ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer, -1:32/signed-integer,
+                     ValueSize:32/signed-integer, KV:ValueSize/binary, Rest/binary>>, Acc) ->
     #{message_set := Set,
       high_water_mark := Mark} = Acc,
     Mark1 = max(ID, Mark),
     Set1 = [KV | Set],
-    decode_fetch_response(Rest, Acc#{message_set := Set1, high_water_mark := Mark1});
-decode_fetch_response(Data, Acc) ->
-    {more, Data, Acc}.
-
-resp_map() ->
-    %% there are a number of fields that we're not including currently:
-    %% - throttle time
-    %% - partition
-    %% - message set size
-    %% - topic name
-    #{high_water_mark => 0,
-      message_set => []}.
+    decode_message_set(Rest, Acc#{message_set := Set1, high_water_mark := Mark1}).
