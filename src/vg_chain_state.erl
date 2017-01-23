@@ -44,27 +44,35 @@ handle_cast(_Msg, State) ->
 
 handle_info(timeout, State=#state{replicas=Replicas}) ->
     Members = join(),
-    Role = role(node(), Members),
-    NextNode = next_node(Role, node(), Members),
-    Self = self(),
-    vg_peer_service:on_down(NextNode, fun() -> Self ! {next_node_down, NextNode} end),
-    lager:info("at=chain_join role=~s next_node=~p members=~p", [Role, NextNode, Members]),
-
-    {ok, CurrentMembers} = vg_peer_service:members(),
-    _ = [net_adm:ping(Member) || Member <- CurrentMembers],
-    case length(CurrentMembers) of
-        Replicas ->
-            lager:info("at=chain_complete requested_size=~p", [Replicas]),
+    case role(node(), Members) of
+        solo ->
+            lager:info("at=chain_complete role=solo requested_size=1", []),
             {noreply, State#state{members=Members,
-                                  role=Role,
-                                  next_node=NextNode,
+                                  role=solo,
+                                  next_node=tail,
                                   active=true}};
-        Size ->
-            lager:info("at=chain_incomplete requested_size=~p current_size=~p", [Replicas, Size]),
-            {noreply, State#state{members=Members,
-                                  role=Role,
-                                  next_node=NextNode,
-                                  active=false}, 200}
+        Role ->
+            NextNode = next_node(Role, node(), Members),
+            Self = self(),
+            vg_peer_service:on_down(NextNode, fun() -> Self ! {next_node_down, NextNode} end),
+            lager:info("at=chain_join role=~s next_node=~p members=~p", [Role, NextNode, Members]),
+
+            {ok, CurrentMembers} = vg_peer_service:members(),
+            _ = [net_adm:ping(Member) || Member <- CurrentMembers],
+            case length(CurrentMembers) of
+                Replicas ->
+                    lager:info("at=chain_complete requested_size=~p", [Replicas]),
+                    {noreply, State#state{members=Members,
+                                          role=Role,
+                                          next_node=NextNode,
+                                          active=true}};
+                Size ->
+                    lager:info("at=chain_incomplete requested_size=~p current_size=~p", [Replicas, Size]),
+                    {noreply, State#state{members=Members,
+                                          role=Role,
+                                          next_node=NextNode,
+                                          active=false}, 200}
+            end
     end;
 handle_info({next_node_down, NextNode}, State) ->
     %% is this the right place to do this?
