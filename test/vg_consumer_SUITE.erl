@@ -39,7 +39,7 @@ from_zero(_Config) ->
                  vg_client:produce(Topic, [<<"message 1 wasn't long enough to make wrapping fail">>,
                                            <<"message 2">>])),
 
-    #{message_set := Data} = vg_client:fetch_until(Topic, 1),
+    #{partitions := [#{message_set := Data}]} = vg_client:fetch_until(Topic, 1),
     ?assertEqual([<<"message 1 wasn't long enough to make wrapping fail">>, <<"message 2">>], Data),
     vg_client_pool:stop(),
     ok.

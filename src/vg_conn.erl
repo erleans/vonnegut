@@ -24,6 +24,7 @@
 -type partition() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 
 -record(state, {socket :: inets:socket(),
+                role   :: head | tail, %% middle disconnects
                 ref    :: reference(),
                 buffer :: binary()}).
 
@@ -33,8 +34,17 @@ acceptor_init(_SockName, LSocket, []) ->
     {ok, MRef}.
 
 acceptor_continue(_PeerName, Socket, MRef) ->
-    lager:debug("at=new_connection node=~p peer=~p", [node(), _PeerName]),
-    gen_server:enter_loop(?MODULE, [], #state{socket=Socket, ref=MRef, buffer = <<>>}).
+    case vg_chain_state:role() of
+        middle ->
+            lager:debug("at=new_connection error=client_middle node=~p peer=~p",
+                        [node(), _PeerName]),
+            {error, no_valid_client_operations};
+        Role ->
+            lager:debug("at=new_connection node=~p role=~p peer=~p",
+                        [node(), Role, _PeerName]),
+            gen_server:enter_loop(?MODULE, [], #state{socket = Socket, ref = MRef,
+                                                      role = Role, buffer = <<>>})
+    end.
 
 acceptor_terminate(Reason, _) ->
     % Something went wrong. Either the acceptor_pool is terminating or the
@@ -53,10 +63,15 @@ handle_cast(Req, State) ->
     {stop, {bad_cast, Req}, State}.
 
 handle_info({tcp, Socket, Data}, State=#state{socket=Socket,
+                                              role=Role,
                                               buffer=Buffer}) ->
-    NewBuffer = handle_data(<<Buffer/binary, Data/binary>>, Socket),
-    ok = inet:setopts(Socket, [{active, once}]),
-    {noreply, State#state{buffer=NewBuffer}};
+    case handle_data(<<Buffer/binary, Data/binary>>, Role, Socket) of
+        {ok, NewBuffer} ->
+            ok = inet:setopts(Socket, [{active, once}]),
+            {noreply, State#state{buffer=NewBuffer}};
+        {error, Reason} ->
+            {stop, Reason, State}
+    end;
 handle_info({tcp_error, Socket, Reason}, State=#state{socket=Socket}) ->
     {stop, Reason, State};
 handle_info({tcp_closed, Socket}, State=#state{socket=Socket}) ->
@@ -80,29 +95,40 @@ terminate(_, _) ->
 
 %% If a message can be fully read from the data then handle the request
 %% else return the data to be kept in the buffer
--spec handle_data(binary(), inets:socket()) -> binary().
-handle_data(<<Size:32/signed-integer, Message:Size/binary, Rest/binary>>, Socket) ->
-    handle_request(Message, Socket),
-    Rest;
-handle_data(Data, _Socket) ->
-    Data.
+-spec handle_data(binary(), head | solo | tail, inets:socket()) ->
+                         {ok, binary()} | {error, any()}.
+handle_data(<<Size:32/signed-integer, Message:Size/binary, Rest/binary>>,
+            Role, Socket) ->
+    case handle_request(Message, Role, Socket) of
+        {error, Reason} ->
+            {error, Reason};
+        _ ->
+            {ok, Rest}
+    end;
+handle_data(Data, _Role, _Socket) ->
+    {ok, Data}.
 
 %% Parse out the type of request (apikey) and the request data
 handle_request(<<ApiKey:16/signed-integer, _ApiVersion:16/signed-integer, CorrelationId:32/signed-integer,
-                 ClientIdSize:16/signed-integer, _ClientId:ClientIdSize/binary, Request/binary>>, Socket) ->
-    More = handle_request(ApiKey, Request, CorrelationId, Socket),
-    More.
+                 ClientIdSize:16/signed-integer, _ClientId:ClientIdSize/binary, Request/binary>>,
+               Role, Socket) ->
+    handle_request(ApiKey, Role, Request, CorrelationId, Socket).
 
-handle_request(?METADATA_REQUEST, Data, CorrelationId, Socket) ->
-    Topics = vg_protocol:decode_metadata_request(Data),
+handle_request(?METADATA_REQUEST, _, Data, CorrelationId, Socket) ->
+    Topics0 = vg_protocol:decode_metadata_request(Data),
+    Topics = case Topics0 of
+                 [] -> get_all_topics();
+                 _ -> Topics0
+             end,
     %% need to return all nodes and start giving nodes an integer id
     Brokers = [{0, <<"localhost">>, 5555}],
-    TopicMetadata = [[{0, Topic, [{0, 0, 0, [], []}]}] || Topic <- Topics],
+    TopicMetadata = [{0, Topic, [{0, 0, 0, [], []}]} || Topic <- Topics],
     Response = vg_protocol:encode_metadata_response(Brokers, TopicMetadata),
     Size = erlang:iolist_size(Response) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, Response]);
-handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/signed-integer,
-                                 _MinBytes:32/signed-integer, Rest/binary>>, CorrelationId, Socket) ->
+handle_request(?FETCH_REQUEST, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/signed-integer,
+                                       _MinBytes:32/signed-integer, Rest/binary>>,
+               CorrelationId, Socket) when Role =:= tail orelse Role =:= solo ->
     {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
     {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
 
@@ -116,10 +142,19 @@ handle_request(?FETCH_REQUEST, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/s
         gen_tcp:send(Socket, [<<(Bytes + 4 + iolist_size(Response)):32/signed-integer,
                                 CorrelationId:32/signed-integer>>, Response]),
         {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, [])
+        %% maybe catch any errors here and report them?
     after
         file:close(Fd)
     end;
-handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
+handle_request(?FETCH_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
+                                     _MinBytes:32/signed, Rest/binary>>,
+               CorrelationId, Socket) ->
+    {[{Topic, [{Partition, _Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
+    Response = vg_protocol:encode_fetch_response(Topic, Partition, ?FETCH_DISALLOWED_ERROR, 0, 0),
+    Size = erlang:iolist_size(Response) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]),
+    {error, request_disallowed};
+handle_request(?PRODUCE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
     Results = [{Topic, [begin
                             {ok, Offset} = vg_active_segment:write(Topic, Partition, MessageSet),
@@ -129,9 +164,17 @@ handle_request(?PRODUCE_REQUEST, Data, CorrelationId, Socket) ->
     ProduceResponse = vg_protocol:encode_produce_response(Results),
     Size = erlang:iolist_size(ProduceResponse) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, ProduceResponse]);
-handle_request(?TOPICS_REQUEST, <<>>, CorrelationId, Socket) ->
-    Children = [Partition || {Partition, _, _, [C]} <- supervisor:which_children(vonnegut_sup),
-                             C == vg_topic_sup],
+handle_request(?PRODUCE_REQUEST, _, Data, CorrelationId, Socket) ->
+    {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
+    Results = [{Topic, [{Partition, ?PRODUCE_DISALLOWED_ERROR, 0}
+                        || {Partition, _MessageSet} <- PartitionData]}
+              || {Topic, PartitionData} <- TopicData],
+    ProduceResponse = vg_protocol:encode_produce_response(Results),
+    Size = erlang:iolist_size(ProduceResponse) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ProduceResponse]),
+    {error, request_disallowed};
+handle_request(?TOPICS_REQUEST, _Role, <<>>, CorrelationId, Socket) ->
+    Children = get_all_topics(),
     Topics = [vg_protocol:encode_string(T) || T <- Children],
     Response = vg_protocol:encode_array(Topics),
     Size = erlang:iolist_size(Response) + 4,
@@ -147,6 +190,10 @@ decode_partition(<<Partition:32/signed-integer, FetchOffset:64/signed-integer, M
     {{Partition, FetchOffset, MaxBytes}, Rest}.
 
 %%
+
+get_all_topics() ->
+    [Partition || {Partition, _, _, [C]} <- supervisor:which_children(vonnegut_sup),
+                  C == vg_topic_sup].
 
 flush_socket(Socket) ->
     receive

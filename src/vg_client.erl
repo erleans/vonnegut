@@ -34,25 +34,30 @@ fetch_until(Topic, Position, Target) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
     lager:info("fetch request to pool: ~p ~p", [Topic, Pool]),
     Loop =
-        fun Loop(Acc=#{high_water_mark := Offset}) ->
+        fun Loop(#{partitions := [#{high_water_mark := Offset}]} = Acc) ->
                 Resp0 = shackle:call(Pool, {fetch, Topic, 0, Offset}),
                 Resp = merge_fetch_response(Acc, Resp0),
-                #{high_water_mark := Mark} = Resp,
+                #{partitions := [#{high_water_mark := Mark}]} = Resp,
                 case Mark >= Target of
                     true ->
                         Resp;
                     _ ->
-                        Loop(Resp#{high_water_mark => Mark+1})
+                        #{partitions := [Part0]} = Resp,
+                        Part = Part0#{high_water_mark => Mark + 1},
+                        Loop(Resp#{partitions := [Part]})
                 end
         end,
-    Loop(#{message_set => [], high_water_mark => Position}).
+    Loop(#{topic => Topic, partitions => [#{message_set => [],
+                                            high_water_mark => Position}]}).
 
 merge_fetch_response(One, Two) ->
-    #{message_set := Set1} = One,
-    #{message_set := Set2} = Two,
+    %% TODO: this will need to be more sophisticated to handle
+    %% multiple partitions
+    #{partitions := [#{message_set := Set1}]} = One,
+    #{partitions := [#{message_set := Set2} = Part]} = Two,
     %% we assume ordering here, so Two's mark will be larger than
-    %% one's, and when we append we'll preserve ordering.
-    Two#{message_set := lists:append(Set1, Set2)}.
+    %% One's, and when we append we'll preserve ordering.
+    Two#{partitions := [Part#{message_set := lists:append(Set1, Set2)}]}.
 
 produce(Topic, RecordSet) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, write),
