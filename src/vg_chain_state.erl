@@ -107,8 +107,6 @@ role(Node, Nodes) ->
             middle
     end.
 
-next_node(solo, _, _) ->
-    tail;
 next_node(tail, _, _) ->
     tail;
 next_node(head, _, [_, Next | _]) ->

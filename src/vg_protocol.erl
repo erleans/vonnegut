@@ -142,9 +142,11 @@ decode_array(DecodeFun, <<Length:32/signed-integer, Rest/binary>>) ->
 decode_array(_, 0, Rest, Acc) ->
     {Acc, Rest};
 decode_array(DecodeFun, N, Rest, Acc) ->
-    {Element, Rest1} = DecodeFun(Rest),
-    decode_array(DecodeFun, N-1, Rest1, [Element | Acc]).
-
+    case DecodeFun(Rest) of
+        {Element, Rest1} ->
+            decode_array(DecodeFun, N-1, Rest1, [Element | Acc]);
+        more -> more
+    end.
 
 decode_record_set(<<>>) ->
     [];
