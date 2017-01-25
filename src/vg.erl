@@ -1,6 +1,7 @@
 -module(vg).
 
 -export([create_topic/1,
+         ensure_topic/1,
          write/2,
          fetch/2,
          fetch/1]).
@@ -8,6 +9,16 @@
 create_topic(Topic) ->
     {ok, _} = vonnegut_sup:create_topic(Topic),
     ok.
+
+ensure_topic(Topic) ->
+    case vonnegut_sup:create_topic(Topic) of
+        {ok, _} ->
+            ok;
+        {error, {already_started, _}} ->
+            ok;
+        _ ->
+            error
+    end.
 
 write(Topic, Message) when is_binary(Message) ->
     vg_active_segment:write(Topic, 0, [Message]);
@@ -25,4 +36,5 @@ fetch(Topic, Offset) ->
     {ok, Fd} = file:open(File, [read, binary, raw]),
     {ok, [Data]} = file:pread(Fd, [{Position, Size}]),
     file:close(Fd),
-    vg_protocol:decode_fetch_response(Data).
+    Header = vg_protocol:encode_fetch_response(Topic, Partition, 0, Offset, Size),
+    vg_protocol:decode_fetch_response(iolist_to_binary([Header, Data])).

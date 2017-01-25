@@ -5,6 +5,12 @@
          get_pool/2,
          refresh_topic_map/0]).
 
+-ifdef(TEST).
+
+-export([start_pool/2]).
+
+-endif.
+
 -define(topic_map, topic_map).
 
 -define(OPTIONS, [set, public, named_table, {read_concurrency, true}]).

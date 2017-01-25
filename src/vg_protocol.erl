@@ -3,15 +3,18 @@
 -export([encode_fetch/4,
          encode_produce/3,
          encode_request/4,
+         encode_metadata_response/2,
 
          encode_array/1,
          encode_message/2,
          encode_string/1,
          encode_bytes/1,
          encode_produce_response/1,
-
+         encode_fetch_response/5,
          decode_array/2,
          decode_record_set/1,
+
+         decode_metadata_request/1,
 
          decode_produce_request/1,
          decode_fetch_response/1,
@@ -23,12 +26,12 @@
 %% encode requests
 
 encode_fetch(ReplicaId, MaxWaitTime, MinBytes, Topics) ->
-    [<<ReplicaId:32/signed, MaxWaitTime:32/signed, MinBytes:32/signed>>, encode_topics(Topics)].
+    [<<ReplicaId:32/signed-integer, MaxWaitTime:32/signed-integer, MinBytes:32/signed-integer>>, encode_topics(Topics)].
 
 encode_produce(Acks, Timeout, TopicData) when Acks =:= -1
                                             ; Acks =:= 0
                                             ; Acks =:= 1 ->
-    [<<Acks:16/signed, Timeout:32/signed>>, encode_topic_data(TopicData)].
+    [<<Acks:16/signed-integer, Timeout:32/signed-integer>>, encode_topic_data(TopicData)].
 
 encode_topic_data(TopicData) ->
     encode_array([[encode_string(Topic), encode_data(Data)] || {Topic, Data} <- TopicData]).
@@ -36,14 +39,14 @@ encode_topic_data(TopicData) ->
 encode_data(Data) ->
     encode_array([begin
                       RecordSetEncoded = encode_record_set(RecordSet, 0),
-                      [<<Partition:32/signed, (iolist_size(RecordSetEncoded)):32>>, RecordSetEncoded]
+                      [<<Partition:32/signed-integer, (iolist_size(RecordSetEncoded)):32>>, RecordSetEncoded]
                   end || {Partition, RecordSet} <- Data]).
 
 encode_topics(Topics) ->
     encode_array([[encode_string(Topic), encode_partitions(Partitions)] || {Topic, Partitions} <- Topics]).
 
 encode_partitions(Partitions) ->
-    encode_array([<<Partition:32/signed, Offset:64/signed, MaxBytes:32/signed>>
+    encode_array([<<Partition:32/signed-integer, Offset:64/signed-integer, MaxBytes:32/signed-integer>>
                      || {Partition, Offset, MaxBytes} <- Partitions]).
 
 encode_request(ApiKey, CorrelationId, ClientId, Request) ->
@@ -52,17 +55,17 @@ encode_request(ApiKey, CorrelationId, ClientId, Request) ->
 %% generic encode functions
 
 encode_string(undefined) ->
-    <<-1:32/signed>>;
+    <<-1:16/signed-integer>>;
 encode_string(Data) when is_binary(Data) ->
-    [<<(size(Data)):32>>, Data];
+    [<<(size(Data)):16>>, Data];
 encode_string(Data) ->
-    [<<(length(Data)):32>>, Data].
+    [<<(length(Data)):16>>, Data].
 
 encode_array(Array) ->
     [<<(length(Array)):32>>, Array].
 
 encode_bytes(undefined) ->
-    <<-1:32/signed>>;
+    <<-1:32/signed-integer>>;
 encode_bytes(Data) ->
     [<<(size(Data)):32>>, Data].
 
@@ -87,9 +90,9 @@ encode_record(Record, Compression) ->
 encode_message(Id, KeyValue) ->
     KV = encode_kv(KeyValue),
     CRC = erlang:crc32(KV),
-    MessageIoList = [<<CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed>>, KV],
+    MessageIoList = [<<CRC:32/signed-integer, ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer>>, KV],
     MessageSize = erlang:iolist_size(MessageIoList),
-    {Id+1, MessageSize+12, [<<Id:64/signed, MessageSize:32/signed>>, MessageIoList]}.
+    {Id+1, MessageSize+12, [<<Id:64/signed-integer, MessageSize:32/signed-integer>>, MessageIoList]}.
 
 encode_kv({Key, Value}) ->
     [encode_bytes(Key), encode_bytes(Value)];
@@ -107,46 +110,73 @@ encode_produce_response([{Topic, Partitions} | T], Acc) ->
     encode_produce_response(T, [[encode_string(Topic), encode_produce_response_partitions(Partitions)] | Acc]).
 
 encode_produce_response_partitions(Partitions) ->
-    encode_array([<<Partition:32/signed, ErrorCode:16/signed, Offset:64/signed>>
+    encode_array([<<Partition:32/signed-integer, ErrorCode:16/signed-integer, Offset:64/signed-integer>>
                      || {Partition, ErrorCode, Offset} <- Partitions]).
+
+encode_fetch_response(Topic, Partition, ErrorCode, HighWaterMark, Bytes) ->
+    encode_array([[encode_string(Topic), encode_array([<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
+                                                         HighWaterMark:64/signed-integer, Bytes:32/signed-integer>>])]]).
+
+encode_metadata_response(Brokers, TopicMetadata) ->
+    [encode_brokers(Brokers), encode_topic_metadata(TopicMetadata)].
+
+encode_brokers(Brokers) ->
+    encode_array([[<<NodeId:32/signed-integer>>, encode_string(Host), <<Port:32/signed-integer>>]
+                 || {NodeId, Host, Port} <- Brokers]).
+
+encode_topic_metadata(TopicMetadata) ->
+    encode_array([[<<TopicErrorCode:16>>, encode_string(Topic), encode_partition_metadata(PartitionMetadata)]
+                    || {TopicErrorCode, Topic, PartitionMetadata} <- TopicMetadata]).
+
+encode_partition_metadata(PartitionMetadata) ->
+    encode_array([[<<PartitionErrorCode:16/signed-integer, PartitionId:32/signed-integer, Leader:32/signed-integer>>,
+                    encode_array([<<Replica:32/signed-integer>> || Replica <- Replicas]),
+                    encode_array([<<I:32>> || I <- Isr])]
+                     || {PartitionErrorCode, PartitionId, Leader, Replicas, Isr} <- PartitionMetadata]).
 
 %% decode generic functions
 
-decode_array(DecodeFun, <<Length:32/signed, Rest/binary>>) ->
+decode_array(DecodeFun, <<Length:32/signed-integer, Rest/binary>>) ->
     decode_array(DecodeFun, Length, Rest, []).
 
 decode_array(_, 0, Rest, Acc) ->
     {Acc, Rest};
 decode_array(DecodeFun, N, Rest, Acc) ->
-    {Element, Rest1} = DecodeFun(Rest),
-    decode_array(DecodeFun, N-1, Rest1, [Element | Acc]).
-
+    case DecodeFun(Rest) of
+        {Element, Rest1} ->
+            decode_array(DecodeFun, N-1, Rest1, [Element | Acc]);
+        more -> more
+    end.
 
 decode_record_set(<<>>) ->
     [];
-decode_record_set(<<?OFFSET:64, Size:32/signed, Record:Size/binary, Rest/binary>>) ->
+decode_record_set(<<?OFFSET:64, Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
     [decode_record(Record) | decode_record_set(Rest)].
 
-decode_record(<<_CRC:32/signed, ?API_VERSION:8, _Compression:8, -1:32/signed, Size:32/signed, Data:Size/binary>>) ->
+decode_record(<<_CRC:32/signed-integer, ?API_VERSION:8, _Compression:8, -1:32/signed-integer, Size:32/signed-integer, Data:Size/binary>>) ->
     Data.
 
 %% decode requests
 
-decode_produce_request(<<Acks:16/signed, Timeout:32/signed, Topics/binary>>) ->
+decode_metadata_request(Msg) ->
+    {Topics, _rest} = decode_array(fun decode_topics/1, Msg),
+    Topics.
+
+decode_produce_request(<<Acks:16/signed-integer, Timeout:32/signed-integer, Topics/binary>>) ->
     {TopicsDecode, _} = decode_array(fun decode_produce_topics_request/1, Topics),
     {Acks, Timeout, TopicsDecode}.
 
-decode_produce_topics_request(<<Size:32/signed, Topic:Size/binary, Rest/binary>>) ->
+decode_produce_topics_request(<<Size:16/signed-integer, Topic:Size/binary, Rest/binary>>) ->
     {TopicData, Rest1} = decode_array(fun decode_produce_partitions_request/1, Rest),
     {{Topic, TopicData}, Rest1}.
 
-decode_produce_partitions_request(<<Partition:32/signed, Size:32/signed, RecordSet:Size/binary, Rest/binary>>) ->
+decode_produce_partitions_request(<<Partition:32/signed-integer, Size:32/signed-integer, RecordSet:Size/binary, Rest/binary>>) ->
     {{Partition, decode_record_set(RecordSet)}, Rest}.
 
 %% decode responses
 
-decode_response(<<Size:32/signed, Message:Size/binary, Rest/binary>>) ->
-    <<CorrelationId:32/signed, Response/binary>> = Message,
+decode_response(<<Size:32/signed-integer, Message:Size/binary, Rest/binary>>) ->
+    <<CorrelationId:32/signed-integer, Response/binary>> = Message,
     {CorrelationId, Response, Rest};
 decode_response(_) ->
     more.
@@ -167,44 +197,61 @@ decode_produce_response(Response) ->
       offset => Offset,
       error_code => ErrorCode}.
 
-decode_produce_response_topics(<<Size:32/signed, Topic:Size/binary, PartitionsRaw/binary>>) ->
+decode_produce_response_topics(<<Size:16/signed-integer, Topic:Size/binary, PartitionsRaw/binary>>) ->
     {Partitions, Rest} = decode_array(fun decode_produce_response_partitions/1, PartitionsRaw),
     {{Topic, Partitions}, Rest}.
 
-decode_produce_response_partitions(<<Partition:32/signed, ErrorCode:16/signed, Offset:64/signed, Rest/binary>>) ->
+decode_produce_response_partitions(<<Partition:32/signed-integer, ErrorCode:16/signed-integer, Offset:64/signed-integer, Rest/binary>>) ->
     {{Partition, ErrorCode, Offset}, Rest}.
 
 decode_topics_response(Msg) ->
-    {Topics, _rest} = decode_array(fun decode_topics/1, Msg),
+    {Topics, _Rest} = decode_array(fun decode_topics/1, Msg),
     Topics.
 
-decode_topics(<<Size:32/signed, Topic:Size/bytes, Rest/binary>>) ->
+decode_topics(<<Size:16/signed-integer, Topic:Size/bytes, Rest/binary>>) ->
     {Topic, Rest}.
 
 decode_fetch_response(Msg) ->
-    decode_fetch_response(Msg, resp_map()).
+    case decode_array(fun decode_fetch_topic/1, Msg) of
+        %% TODO: unwrapping the topic here because we don't currently
+        %% handle multiple topics.  it might be easiest to roll this
+        %% up into a map of topics => responses rather than an array
+        {[Topic], _Rest} ->
+            Topic;
+        more -> more
+    end.
 
-decode_fetch_response(eof, Acc) ->
+decode_fetch_topic(<<Sz:16/signed-integer, Topic:Sz/binary, Partitions/binary>>) ->
+    case decode_array(fun decode_fetch_partition/1, Partitions) of
+        {DecPartitions, Rest} ->
+            {#{topic => Topic, partitions => DecPartitions}, Rest};
+        more -> more
+    end.
+
+decode_fetch_partition(<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
+                         HighWaterMark:64/signed-integer, Bytes:32/signed-integer, MessageSet:Bytes/bytes,
+                         Rest/binary>>) ->
+    %% there are a number of fields that we're not including currently:
+    %% - throttle time
+    %% - topic name
+    {decode_message_set(MessageSet,
+                        #{high_water_mark => HighWaterMark,
+                          partition => Partition,
+                          message_set_size => Bytes,
+                          error_code => ErrorCode,
+                          message_set => []
+                         }), Rest};
+decode_fetch_partition(_) ->
+    more.
+
+decode_message_set(End, Acc) when End =:= eof orelse End =:= <<>> ->
     #{message_set := Set} = Acc,
     Acc#{message_set := lists:reverse(Set)};
-decode_fetch_response(<<>>, Acc) ->
-    #{message_set := Set} = Acc,
-    Acc#{message_set := lists:reverse(Set)};
-decode_fetch_response(<<ID:64/signed, _MessageSize:32/signed, _CRC:32/signed, ?MAGIC:8/signed, ?ATTRIBUTES:8/signed,
-                        -1:32/signed, ValueSize:32/signed, KV:ValueSize/binary, Rest/binary>>, Acc) ->
+decode_message_set(<<ID:64/signed-integer, _MessageSize:32/signed-integer, _CRC:32/signed-integer,
+                     ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer, -1:32/signed-integer,
+                     ValueSize:32/signed-integer, KV:ValueSize/binary, Rest/binary>>, Acc) ->
     #{message_set := Set,
       high_water_mark := Mark} = Acc,
     Mark1 = max(ID, Mark),
     Set1 = [KV | Set],
-    decode_fetch_response(Rest, Acc#{message_set := Set1, high_water_mark := Mark1});
-decode_fetch_response(Data, Acc) ->
-    {more, Data, Acc}.
-
-resp_map() ->
-    %% there are a number of fields that we're not including currently:
-    %% - throttle time
-    %% - partition
-    %% - message set size
-    %% - topic name
-    #{high_water_mark => 0,
-      message_set => []}.
+    decode_message_set(Rest, Acc#{message_set := Set1, high_water_mark := Mark1}).

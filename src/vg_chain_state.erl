@@ -3,6 +3,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0,
+         role/0,
          next/0]).
 
 -export([init/1,
@@ -29,6 +30,9 @@ start_link() ->
 next() ->
     gen_server:call(?SERVER, next).
 
+role() ->
+    gen_server:call(?SERVER, role).
+
 init([]) ->
     Replicas = list_to_integer(application:get_env(vonnegut, replicas, "1")),
     {ok, #state{replicas=Replicas,
@@ -36,6 +40,8 @@ init([]) ->
 
 handle_call(next, _From, State = #state{next_node = Next}) ->
     {reply, Next, State};
+handle_call(role, _From, State = #state{role = Role}) ->
+    {reply, Role, State};
 handle_call(_, _From, State) ->
     {noreply, State}.
 
@@ -44,27 +50,35 @@ handle_cast(_Msg, State) ->
 
 handle_info(timeout, State=#state{replicas=Replicas}) ->
     Members = join(),
-    Role = role(node(), Members),
-    NextNode = next_node(Role, node(), Members),
-    Self = self(),
-    vg_peer_service:on_down(NextNode, fun() -> Self ! {next_node_down, NextNode} end),
-    lager:info("at=chain_join role=~s next_node=~p members=~p", [Role, NextNode, Members]),
-
-    {ok, CurrentMembers} = vg_peer_service:members(),
-    _ = [net_adm:ping(Member) || Member <- CurrentMembers],
-    case length(CurrentMembers) of
-        Replicas ->
-            lager:info("at=chain_complete requested_size=~p", [Replicas]),
+    case role(node(), Members) of
+        solo ->
+            lager:info("at=chain_complete role=solo requested_size=1", []),
             {noreply, State#state{members=Members,
-                                  role=Role,
-                                  next_node=NextNode,
+                                  role=solo,
+                                  next_node=tail,
                                   active=true}};
-        Size ->
-            lager:info("at=chain_incomplete requested_size=~p current_size=~p", [Replicas, Size]),
-            {noreply, State#state{members=Members,
-                                  role=Role,
-                                  next_node=NextNode,
-                                  active=false}, 200}
+        Role ->
+            NextNode = next_node(Role, node(), Members),
+            Self = self(),
+            vg_peer_service:on_down(NextNode, fun() -> Self ! {next_node_down, NextNode} end),
+            lager:info("at=chain_join role=~s next_node=~p members=~p", [Role, NextNode, Members]),
+
+            {ok, CurrentMembers} = vg_peer_service:members(),
+            _ = [net_adm:ping(Member) || Member <- CurrentMembers],
+            case length(CurrentMembers) of
+                Replicas ->
+                    lager:info("at=chain_complete requested_size=~p", [Replicas]),
+                    {noreply, State#state{members=Members,
+                                          role=Role,
+                                          next_node=NextNode,
+                                          active=true}};
+                Size ->
+                    lager:info("at=chain_incomplete requested_size=~p current_size=~p", [Replicas, Size]),
+                    {noreply, State#state{members=Members,
+                                          role=Role,
+                                          next_node=NextNode,
+                                          active=false}, 200}
+            end
     end;
 handle_info({next_node_down, NextNode}, State) ->
     %% is this the right place to do this?
@@ -93,8 +107,6 @@ role(Node, Nodes) ->
             middle
     end.
 
-next_node(solo, _, _) ->
-    tail;
 next_node(tail, _, _) ->
     tail;
 next_node(head, _, [_, Next | _]) ->
