@@ -6,7 +6,7 @@
          encode_metadata_response/2,
 
          encode_array/1,
-         encode_message/2,
+         encode_id_record/2,
          encode_string/1,
          encode_bytes/1,
          encode_produce_response/1,
@@ -20,7 +20,7 @@
          decode_fetch_response/1,
          decode_response/1,
          decode_response/2,
-         decode_message_set/2]).
+         decode_record_set/2]).
 
 -include("vg.hrl").
 
@@ -83,17 +83,17 @@ encode_record(Record, Compression) ->
     Record2 = [<<?API_VERSION:8, Compression:8>>, encode_bytes(undefined), encode_bytes(Record)],
     [<<(erlang:crc32(Record2)):32>>, Record2].
 
-%% <<Id:64, MessageSize:32, Crc:32, MagicByte:8, Attributes:8, Key/Value>>
--spec encode_message(Id, Values) -> EncodedLog when
+%% <<Id:64, RecordSize:32, Crc:32, MagicByte:8, Attributes:8, Key/Value>>
+-spec encode_id_record(Id, Value) -> EncodedLog when
       Id :: integer(),
-      Values :: binary() | {binary(), binary()},
+      Value :: #{crc := integer(),
+                  record := binary() | {binary(), binary()}},
       EncodedLog :: {pos_integer(), pos_integer(), iolist()}.
-encode_message(Id, KeyValue) ->
+encode_id_record(Id, #{crc := CRC, record := KeyValue}) ->
     KV = encode_kv(KeyValue),
-    CRC = erlang:crc32(KV),
-    MessageIoList = [<<CRC:32/signed-integer, ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer>>, KV],
-    MessageSize = erlang:iolist_size(MessageIoList),
-    {Id+1, MessageSize+12, [<<Id:64/signed-integer, MessageSize:32/signed-integer>>, MessageIoList]}.
+    RecordIoList = [<<CRC:32/signed-integer, ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer>>, KV],
+    RecordSize = erlang:iolist_size(RecordIoList),
+    {Id+1, RecordSize+12, [<<Id:64/signed-integer, RecordSize:32/signed-integer>>, RecordIoList]}.
 
 encode_kv({Key, Value}) ->
     [encode_bytes(Key), encode_bytes(Value)];
@@ -154,8 +154,10 @@ decode_record_set(<<>>) ->
 decode_record_set(<<?OFFSET:64, Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
     [decode_record(Record) | decode_record_set(Rest)].
 
-decode_record(<<_CRC:32/signed-integer, ?API_VERSION:8, _Compression:8, -1:32/signed-integer, Size:32/signed-integer, Data:Size/binary>>) ->
-    Data.
+decode_record(<<CRC:32/signed-integer, ?API_VERSION:8, Compression:8, -1:32/signed-integer, Size:32/signed-integer, Data:Size/binary>>) ->
+    #{crc => CRC,
+      compression => Compression,
+      record => Data}.
 
 %% decode requests
 
@@ -176,8 +178,8 @@ decode_produce_partitions_request(<<Partition:32/signed-integer, Size:32/signed-
 
 %% decode responses
 
-decode_response(<<Size:32/signed-integer, Message:Size/binary, Rest/binary>>) ->
-    <<CorrelationId:32/signed-integer, Response/binary>> = Message,
+decode_response(<<Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
+    <<CorrelationId:32/signed-integer, Response/binary>> = Record,
     {CorrelationId, Response, Rest};
 decode_response(_) ->
     more.
@@ -231,31 +233,31 @@ decode_fetch_topic(<<Sz:16/signed-integer, Topic:Sz/binary, Partitions/binary>>)
     end.
 
 decode_fetch_partition(<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
-                         HighWaterMark:64/signed-integer, Bytes:32/signed-integer, MessageSet:Bytes/bytes,
+                         HighWaterMark:64/signed-integer, Bytes:32/signed-integer, RecordSet:Bytes/bytes,
                          Rest/binary>>) ->
     %% there are a number of fields that we're not including currently:
     %% - throttle time
     %% - topic name
-    {decode_message_set(MessageSet,
+    {decode_record_set(RecordSet,
                         #{high_water_mark => HighWaterMark,
                           partition => Partition,
-                          message_set_size => Bytes,
+                          record_set_size => Bytes,
                           error_code => ErrorCode,
-                          message_set => []
+                          record_set => []
                          }), Rest};
 decode_fetch_partition(_) ->
     more.
 
-decode_message_set(End, Acc) when End =:= eof orelse End =:= <<>> ->
-    #{message_set := Set} = Acc,
-    Acc#{message_set := lists:reverse(Set)};
-decode_message_set(<<Id:64/signed-integer, _MessageSize:32/signed-integer, Crc:32/signed-integer,
+decode_record_set(End, Acc) when End =:= eof orelse End =:= <<>> ->
+    #{record_set := Set} = Acc,
+    Acc#{record_set := lists:reverse(Set)};
+decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/signed-integer,
                      ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer, -1:32/signed-integer,
                      ValueSize:32/signed-integer, KV:ValueSize/binary, Rest/binary>>, Acc) ->
-    #{message_set := Set,
+    #{record_set := Set,
       high_water_mark := Mark} = Acc,
     Mark1 = max(Id, Mark),
     Set1 = [#{id => Id,
               crc => Crc,
               record => KV} | Set],
-    decode_message_set(Rest, Acc#{message_set := Set1, high_water_mark := Mark1}).
+    decode_record_set(Rest, Acc#{record_set := Set1, high_water_mark := Mark1}).

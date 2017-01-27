@@ -7,13 +7,13 @@
          find_log_segment/3,
          find_active_segment/2,
          find_segment_offset/3,
-         find_message_offset/4]).
+         find_record_offset/4]).
 
 -include("vg.hrl").
 
 %% log segment servers are index as {Topic,Partition,SegmentId}
 -define(LOG_SEGMENT_MATCH_PATTERN(Topic, Partition), {Topic,Partition,'$1'}).
--define(LOG_SEGMENT_GUARD(MessageId), [{is_integer, '$1'}, {'=<', '$1', MessageId}]).
+-define(LOG_SEGMENT_GUARD(RecordId), [{is_integer, '$1'}, {'=<', '$1', RecordId}]).
 -define(LOG_SEGMENT_RETURN, ['$1']).
 
 init_table() ->
@@ -32,20 +32,20 @@ load_all(Topic, Partition) ->
 insert(Topic, Partition, SegmentId) ->
     ets:insert(?SEGMENTS_TABLE, {Topic, Partition, SegmentId}).
 
--spec find_log_segment(Topic, Partition, MessageId) -> integer() when
+-spec find_log_segment(Topic, Partition, RecordId) -> integer() when
       Topic     :: binary(),
       Partition :: integer(),
-      MessageId :: integer().
-find_log_segment(Topic, Partition, MessageId) ->
-    %% Find all registered log segments for topic-partition < the messageid we are looking for
+      RecordId :: integer().
+find_log_segment(Topic, Partition, RecordId) ->
+    %% Find all registered log segments for topic-partition < the recordid we are looking for
     case ets:select(?SEGMENTS_TABLE, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
-                                       ?LOG_SEGMENT_GUARD(MessageId),
+                                       ?LOG_SEGMENT_GUARD(RecordId),
                                        ?LOG_SEGMENT_RETURN}]) of
         [] ->
             0;
         Matches  ->
             %% Return largest, being the largest log segment
-            %% offset that is still less than the message offset
+            %% offset that is still less than the record offset
             lists:max(Matches)
     end.
 
@@ -62,20 +62,20 @@ find_active_segment(Topic, Partition) ->
             lists:max(Matches)
     end.
 
--spec find_segment_offset(Topic, Partition, MessageId) -> {integer(), integer()} when
+-spec find_segment_offset(Topic, Partition, RecordId) -> {integer(), integer()} when
       Topic     :: binary(),
       Partition :: integer(),
-      MessageId :: integer().
-find_segment_offset(Topic, Partition, MessageId) ->
-    SegmentId = find_log_segment(Topic, Partition, MessageId),
-    {SegmentId, find_message_offset(Topic, Partition, SegmentId, MessageId)}.
+      RecordId :: integer().
+find_segment_offset(Topic, Partition, RecordId) ->
+    SegmentId = find_log_segment(Topic, Partition, RecordId),
+    {SegmentId, find_record_offset(Topic, Partition, SegmentId, RecordId)}.
 
--spec find_message_offset(Topic, Partition, SegmentId, MessageId) -> integer() when
+-spec find_record_offset(Topic, Partition, SegmentId, RecordId) -> integer() when
       Topic     :: binary(),
       Partition :: integer(),
       SegmentId :: integer(),
-      MessageId :: integer().
-find_message_offset(Topic, Partition, SegmentId, MessageId) ->
+      RecordId :: integer().
+find_record_offset(Topic, Partition, SegmentId, RecordId) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     LogSegmentFilename = vg_utils:log_file(TopicDir, SegmentId),
     IndexSegmentFilename = vg_utils:index_file(TopicDir, SegmentId),
@@ -87,8 +87,8 @@ find_message_offset(Topic, Partition, SegmentId, MessageId) ->
     file:advise(IndexSegmentFD, 0, 0, random),
 
     try
-        InitialOffset = vg_index:find_in_index(IndexSegmentFD, SegmentId, MessageId),
-        find_in_log(LogSegmentFD, MessageId, InitialOffset)
+        InitialOffset = vg_index:find_in_index(IndexSegmentFD, SegmentId, RecordId),
+        find_in_log(LogSegmentFD, RecordId, InitialOffset)
     after
         file:close(LogSegmentFD),
         file:close(IndexSegmentFD)

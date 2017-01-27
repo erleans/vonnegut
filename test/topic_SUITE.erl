@@ -49,15 +49,15 @@ write(Config) ->
                    "each according to their needs">>,
     #{topic := Topic, offset := R1} = vg_client:produce(Topic, Communist),
     ct:pal("reply: ~p", [R1]),
-    #{partitions := [#{message_set := Reply}]} = vg_client:fetch(Topic, R1),
+    #{partitions := [#{record_set := Reply}]} = vg_client:fetch(Topic, R1),
     ?assertMatch([#{record := Communist}], Reply),
-    #{partitions := [#{message_set := Reply1}]} = vg_client:fetch_until(Topic, R1 - 1, R1),
+    #{partitions := [#{record_set := Reply1}]} = vg_client:fetch_until(Topic, R1 - 1, R1),
     ?assertMatch([#{record := Anarchist}, #{record := Communist}], Reply1).
 
 ack(Config) ->
     Topic = ?config(topic, Config),
 
-    %% write some random messages to the topic
+    %% write some random records to the topic
     Msgs = [begin
                 Msg = crypto:strong_rand_bytes(60),
                 {ok, _Id} = vg:write(Topic, Msg),
@@ -66,7 +66,7 @@ ack(Config) ->
            || _ <- lists:seq(1, rand:uniform(20))],
 
     %% verify written
-    #{message_set := Reply} = vg:fetch(Topic),
+    #{record_set := Reply} = vg:fetch(Topic),
     Records = [Record || #{record := Record} <- Reply],
     ?assertEqual(Msgs, Records),
 
@@ -77,7 +77,7 @@ ack(Config) ->
     Header = vg_protocol:encode_fetch_response(Topic, 0, 0, length(Msgs), iolist_size(HistoryMsgs)),
     #{partitions :=
           [#{high_water_mark := HighWaterMark, % maybe not a good test
-             message_set := HistorySet}]} =
+             record_set := HistorySet}]} =
         vg_protocol:decode_fetch_response(iolist_to_binary([Header, HistoryMsgs])),
     ?assertEqual(Msgs, [Record || #{record := Record} <- HistorySet]),
 

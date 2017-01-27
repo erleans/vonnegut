@@ -93,7 +93,7 @@ terminate(_, _) ->
 
 %% internal
 
-%% If a message can be fully read from the data then handle the request
+%% If a record can be fully read from the data then handle the request
 %% else return the data to be kept in the buffer
 -spec handle_data(binary(), head | solo | tail, inets:socket()) ->
                          {ok, binary()} | {error, any()}.

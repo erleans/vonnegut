@@ -6,6 +6,11 @@
          fetch/2,
          fetch/1]).
 
+-type record() :: #{id := integer(),
+                    crc := integer(),
+                    record := binary() | {binary(), binary()}}.
+-type record_set() :: [record()].
+
 create_topic(Topic) ->
     {ok, _} = vonnegut_sup:create_topic(Topic),
     ok.
@@ -20,14 +25,24 @@ ensure_topic(Topic) ->
             error
     end.
 
-write(Topic, Message) when is_binary(Message) ->
-    vg_active_segment:write(Topic, 0, [Message]);
-write(Topic, MessageSet) when is_list(MessageSet) ->
-    vg_active_segment:write(Topic, 0, MessageSet).
+-spec write(Topic, Record) -> ok | {error, any()} when
+      Topic :: binary(),
+      Record :: binary() | [#{crc := integer(), record := binary()}].
+write(Topic, Record) when is_binary(Record) ->
+    vg_active_segment:write(Topic, 0, [#{crc => erlang:crc32(Record),
+                                         record => Record}]);
+write(Topic, RecordSet) when is_list(RecordSet) ->
+    vg_active_segment:write(Topic, 0, RecordSet).
 
 fetch(Topic) ->
     fetch(Topic, 0).
 
+-spec fetch(Topic, Offset) -> RecordSet when
+      Topic :: binary(),
+      Offset :: integer(),
+      RecordSet :: #{high_water_mark := integer(),
+                      partition := 0,
+                      record_set := record_set()}.
 fetch(Topic, Offset) ->
     Partition = 0,
     {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
@@ -36,8 +51,8 @@ fetch(Topic, Offset) ->
     {ok, Fd} = file:open(File, [read, binary, raw]),
     {ok, [Data]} = file:pread(Fd, [{Position, Size}]),
     file:close(Fd),
-    vg_protocol:decode_message_set(Data,
+    vg_protocol:decode_record_set(Data,
                                    #{high_water_mark => Offset,
                                      partition => 0,
-                                     message_set => []
+                                     record_set => []
                                     }).
