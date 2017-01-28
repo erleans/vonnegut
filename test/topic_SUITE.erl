@@ -50,9 +50,9 @@ write(Config) ->
     #{topic := Topic, offset := R1} = vg_client:produce(Topic, Communist),
     ct:pal("reply: ~p", [R1]),
     #{partitions := [#{message_set := Reply}]} = vg_client:fetch(Topic, R1),
-    ?assertEqual([Communist], Reply),
+    ?assertMatch([#{record := Communist}], Reply),
     #{partitions := [#{message_set := Reply1}]} = vg_client:fetch_until(Topic, R1 - 1, R1),
-    ?assertEqual([Anarchist, Communist], Reply1).
+    ?assertMatch([#{record := Anarchist}, #{record := Communist}], Reply1).
 
 ack(Config) ->
     Topic = ?config(topic, Config),
@@ -66,8 +66,9 @@ ack(Config) ->
            || _ <- lists:seq(1, rand:uniform(20))],
 
     %% verify written
-    #{partitions := [#{message_set := Reply}]} = vg:fetch(Topic),
-    ?assertEqual(Msgs, Reply),
+    #{message_set := Reply} = vg:fetch(Topic),
+    Records = [Record || #{record := Record} <- Reply],
+    ?assertEqual(Msgs, Records),
 
     %% verify history
     HistoryTab = binary_to_atom(<<Topic/binary, 0>>, utf8),
@@ -78,7 +79,7 @@ ack(Config) ->
           [#{high_water_mark := HighWaterMark, % maybe not a good test
              message_set := HistorySet}]} =
         vg_protocol:decode_fetch_response(iolist_to_binary([Header, HistoryMsgs])),
-    ?assertEqual(Msgs, HistorySet),
+    ?assertEqual(Msgs, [Record || #{record := Record} <- HistorySet]),
 
     %% Ack to the latest Id
     vg_active_segment:ack(Topic, 0, HighWaterMark),

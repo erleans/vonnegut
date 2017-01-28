@@ -36,5 +36,8 @@ fetch(Topic, Offset) ->
     {ok, Fd} = file:open(File, [read, binary, raw]),
     {ok, [Data]} = file:pread(Fd, [{Position, Size}]),
     file:close(Fd),
-    Header = vg_protocol:encode_fetch_response(Topic, Partition, 0, Offset, Size),
-    vg_protocol:decode_fetch_response(iolist_to_binary([Header, Data])).
+    vg_protocol:decode_message_set(Data,
+                                   #{high_water_mark => Offset,
+                                     partition => 0,
+                                     message_set => []
+                                    }).

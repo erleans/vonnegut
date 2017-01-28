@@ -19,7 +19,8 @@
          decode_produce_request/1,
          decode_fetch_response/1,
          decode_response/1,
-         decode_response/2]).
+         decode_response/2,
+         decode_message_set/2]).
 
 -include("vg.hrl").
 
@@ -201,7 +202,8 @@ decode_produce_response_topics(<<Size:16/signed-integer, Topic:Size/binary, Part
     {Partitions, Rest} = decode_array(fun decode_produce_response_partitions/1, PartitionsRaw),
     {{Topic, Partitions}, Rest}.
 
-decode_produce_response_partitions(<<Partition:32/signed-integer, ErrorCode:16/signed-integer, Offset:64/signed-integer, Rest/binary>>) ->
+decode_produce_response_partitions(<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
+                                     Offset:64/signed-integer, Rest/binary>>) ->
     {{Partition, ErrorCode, Offset}, Rest}.
 
 decode_topics_response(Msg) ->
@@ -247,11 +249,13 @@ decode_fetch_partition(_) ->
 decode_message_set(End, Acc) when End =:= eof orelse End =:= <<>> ->
     #{message_set := Set} = Acc,
     Acc#{message_set := lists:reverse(Set)};
-decode_message_set(<<ID:64/signed-integer, _MessageSize:32/signed-integer, _CRC:32/signed-integer,
+decode_message_set(<<Id:64/signed-integer, _MessageSize:32/signed-integer, Crc:32/signed-integer,
                      ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer, -1:32/signed-integer,
                      ValueSize:32/signed-integer, KV:ValueSize/binary, Rest/binary>>, Acc) ->
     #{message_set := Set,
       high_water_mark := Mark} = Acc,
-    Mark1 = max(ID, Mark),
-    Set1 = [KV | Set],
+    Mark1 = max(Id, Mark),
+    Set1 = [#{id => Id,
+              crc => Crc,
+              record => KV} | Set],
     decode_message_set(Rest, Acc#{message_set := Set1, high_water_mark := Mark1}).
