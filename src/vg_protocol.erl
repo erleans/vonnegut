@@ -6,7 +6,8 @@
          encode_metadata_response/2,
 
          encode_array/1,
-         encode_id_record/2,
+         encode_log/2,
+         encode_kv/1,
          encode_string/1,
          encode_bytes/1,
          encode_produce_response/1,
@@ -40,7 +41,7 @@ encode_topic_data(TopicData) ->
 encode_data(Data) ->
     encode_array([begin
                       RecordSetEncoded = encode_record_set(RecordSet, 0),
-                      [<<Partition:32/signed-integer, (iolist_size(RecordSetEncoded)):32>>, RecordSetEncoded]
+                      [<<Partition:32/signed-integer, (iolist_size(RecordSetEncoded)):32/signed-integer>>, RecordSetEncoded]
                   end || {Partition, RecordSet} <- Data]).
 
 encode_topics(Topics) ->
@@ -51,49 +52,58 @@ encode_partitions(Partitions) ->
                      || {Partition, Offset, MaxBytes} <- Partitions]).
 
 encode_request(ApiKey, CorrelationId, ClientId, Request) ->
-    [<<ApiKey:16, ?API_VERSION:16, CorrelationId:32>>, encode_string(ClientId), Request].
+    [<<ApiKey:16/signed-integer, ?API_VERSION:16/signed-integer, CorrelationId:32/signed-integer>>,
+     encode_string(ClientId), Request].
 
 %% generic encode functions
 
 encode_string(undefined) ->
     <<-1:16/signed-integer>>;
 encode_string(Data) when is_binary(Data) ->
-    [<<(size(Data)):16>>, Data];
+    [<<(size(Data)):16/signed-integer>>, Data];
 encode_string(Data) ->
-    [<<(length(Data)):16>>, Data].
+    [<<(length(Data)):16/signed-integer>>, Data].
 
 encode_array(Array) ->
-    [<<(length(Array)):32>>, Array].
+    [<<(length(Array)):32/signed-integer>>, Array].
 
 encode_bytes(undefined) ->
     <<-1:32/signed-integer>>;
 encode_bytes(Data) ->
-    [<<(size(Data)):32>>, Data].
+    [<<(size(Data)):32/signed-integer>>, Data].
 
 encode_record_set([], _Compression) ->
     [];
 encode_record_set(Record, Compression) when is_binary(Record) ->
     Record2 = encode_record(Record, Compression),
-    [<<?OFFSET:64, (iolist_size(Record2)):32>>, Record2];
+    [<<?OFFSET:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2];
 encode_record_set([Record | T], Compression) ->
     Record2 = encode_record(Record, Compression),
-    [[<<?OFFSET:64, (iolist_size(Record2)):32>>, Record2], encode_record_set(T, Compression)].
+    [<<?OFFSET:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2 | encode_record_set(T, Compression)].
 
-encode_record(Record, Compression) ->
-    Record2 = [<<?API_VERSION:8, Compression:8>>, encode_bytes(undefined), encode_bytes(Record)],
-    [<<(erlang:crc32(Record2)):32>>, Record2].
+encode_record(Record, _Compression) ->
+    Record2 = [<<?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer>>, encode_kv(Record)],
+    [<<(erlang:crc32(Record2)):32/unsigned-integer>>, Record2].
 
 %% <<Id:64, RecordSize:32, Crc:32, MagicByte:8, Attributes:8, Key/Value>>
--spec encode_id_record(Id, Value) -> EncodedLog when
+-spec encode_log(Id, Value) -> EncodedLog when
       Id :: integer(),
-      Value :: #{crc := integer(),
-                  record := binary() | {binary(), binary()}},
-      EncodedLog :: {pos_integer(), pos_integer(), iolist()}.
-encode_id_record(Id, #{crc := CRC, record := KeyValue}) ->
-    KV = encode_kv(KeyValue),
-    RecordIoList = [<<CRC:32/signed-integer, ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer>>, KV],
-    RecordSize = erlang:iolist_size(RecordIoList),
-    {Id+1, RecordSize+12, [<<Id:64/signed-integer, RecordSize:32/signed-integer>>, RecordIoList]}.
+      Value :: vg:record(),
+      EncodedLog :: {pos_integer(), pos_integer(), iolist()} | {error, bad_checksum}.
+encode_log(Id, #{crc := CRC, record := Record}) ->
+    case erlang:crc32(Record) of
+        CRC ->
+            RecordIoList = [<<CRC:32/unsigned-integer>>, Record],
+            RecordSize = erlang:iolist_size(RecordIoList),
+            {Id+1, RecordSize+12, [<<Id:64/signed-integer, RecordSize:32/signed-integer>>, RecordIoList]};
+        BadChecksum ->
+            lager:info("checksums don't match crc1=~p crc2=~p", [CRC, BadChecksum]),
+            {error, bad_checksum}
+    end;
+encode_log(Id, #{record := KeyValue}) ->
+    Record = encode_record(KeyValue, 0),
+    RecordSize = erlang:iolist_size(Record),
+    {Id+1, RecordSize+12, [<<Id:64/signed-integer, RecordSize:32/signed-integer>>, Record]}.
 
 encode_kv({Key, Value}) ->
     [encode_bytes(Key), encode_bytes(Value)];
@@ -126,13 +136,13 @@ encode_brokers(Brokers) ->
                  || {NodeId, Host, Port} <- Brokers]).
 
 encode_topic_metadata(TopicMetadata) ->
-    encode_array([[<<TopicErrorCode:16>>, encode_string(Topic), encode_partition_metadata(PartitionMetadata)]
+    encode_array([[<<TopicErrorCode:16/signed-integer>>, encode_string(Topic), encode_partition_metadata(PartitionMetadata)]
                     || {TopicErrorCode, Topic, PartitionMetadata} <- TopicMetadata]).
 
 encode_partition_metadata(PartitionMetadata) ->
     encode_array([[<<PartitionErrorCode:16/signed-integer, PartitionId:32/signed-integer, Leader:32/signed-integer>>,
                     encode_array([<<Replica:32/signed-integer>> || Replica <- Replicas]),
-                    encode_array([<<I:32>> || I <- Isr])]
+                    encode_array([<<I:32/signed-integer>> || I <- Isr])]
                      || {PartitionErrorCode, PartitionId, Leader, Replicas, Isr} <- PartitionMetadata]).
 
 %% decode generic functions
@@ -151,13 +161,13 @@ decode_array(DecodeFun, N, Rest, Acc) ->
 
 decode_record_set(<<>>) ->
     [];
-decode_record_set(<<?OFFSET:64, Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
+decode_record_set(<<?OFFSET:64/signed-integer, Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
     [decode_record(Record) | decode_record_set(Rest)].
 
-decode_record(<<CRC:32/signed-integer, ?API_VERSION:8, Compression:8, -1:32/signed-integer, Size:32/signed-integer, Data:Size/binary>>) ->
+%% <<?MAGIC:8/signed-integer, Compression:8/signed-integer, -1:32/signed-integer, Size:32/signed-integer, Data:Size/binary>>
+decode_record(<<CRC:32/unsigned-integer, Record/binary>>) ->
     #{crc => CRC,
-      compression => Compression,
-      record => Data}.
+      record => Record}.
 
 %% decode requests
 
@@ -173,7 +183,8 @@ decode_produce_topics_request(<<Size:16/signed-integer, Topic:Size/binary, Rest/
     {TopicData, Rest1} = decode_array(fun decode_produce_partitions_request/1, Rest),
     {{Topic, TopicData}, Rest1}.
 
-decode_produce_partitions_request(<<Partition:32/signed-integer, Size:32/signed-integer, RecordSet:Size/binary, Rest/binary>>) ->
+decode_produce_partitions_request(<<Partition:32/signed-integer, Size:32/signed-integer,
+                                    RecordSet:Size/binary, Rest/binary>>) ->
     {{Partition, decode_record_set(RecordSet)}, Rest}.
 
 %% decode responses

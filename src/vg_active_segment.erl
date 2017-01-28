@@ -40,6 +40,11 @@ start_link(Topic, Partition, NextBrick) ->
     Tab = vg_pending_writes:ensure_tab(Topic, Partition),
     gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick, Tab], []).
 
+-spec write(Topic, Partition, RecordSet) -> {ok, Offset} | {error, any()} when
+      Topic :: binary(),
+      Partition :: integer(),
+      RecordSet :: vg:record_set(),
+      Offset :: integer().
 write(Topic, Partition, RecordSet) ->
     %% there clearly needs to be a lot more logic here.  it's also not
     %% clear that this is the right place for this
@@ -166,7 +171,7 @@ code_change(_, State, _) ->
 write_record_set(RecordSet, State=#state{history_tab=Tab}) ->
     {State#state.id, lists:foldl(fun(Record, StateAcc=#state{id=Id,
                                                               byte_count=ByteCount}) ->
-                                     {NextId, Size, Bytes} = vg_protocol:encode_id_record(Id, Record),
+                                     {NextId, Size, Bytes} = vg_protocol:encode_log(Id, Record),
                                      StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
                                      update_log(Bytes, StateAcc1),
                                      StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},

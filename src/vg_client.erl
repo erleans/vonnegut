@@ -84,7 +84,7 @@ handle_request({fetch, Topic, Partition, Position}, #state {
     Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{Partition, Position, 100}]}]),
     Data = vg_protocol:encode_request(?FETCH_REQUEST, RequestId, ?CLIENT_ID, Request),
 
-    {ok, RequestId, [<<(iolist_size(Data)):32/signed>>, Data],
+    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?FETCH_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
 handle_request({produce, Topic, Partition, Records}, #state {
@@ -99,7 +99,7 @@ handle_request({produce, Topic, Partition, Records}, #state {
     Request = vg_protocol:encode_produce(Acks, Timeout, TopicData),
     Data = vg_protocol:encode_request(?PRODUCE_REQUEST, RequestId, ?CLIENT_ID, Request),
 
-    {ok, RequestId, [<<(iolist_size(Data)):32/signed>>, Data],
+    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?PRODUCE_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
 handle_request(topics, #state {
@@ -108,7 +108,7 @@ handle_request(topics, #state {
                          } = State) ->
     RequestId = request_id(RequestCounter),
     Data = vg_protocol:encode_request(?TOPICS_REQUEST, RequestId, ?CLIENT_ID, <<>>),
-    {ok, RequestId, [<<(iolist_size(Data)):32/signed>>, Data],
+    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?TOPICS_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}}.
 
