@@ -133,7 +133,7 @@ bootstrap(Config) ->
     R1 = vg_client:fetch(<<"foo">>),
     ct:pal("r ~p ~p", [R, R1]),
     timer:sleep(1800),
-    ?assertMatch(#{partitions := [#{message_set := [#{record := <<"bar">>}]}]}, R1),
+    ?assertMatch(#{partitions := [#{record_set := [#{record := <<"bar">>}]}]}, R1),
     Config.
 
 roles(Config) ->

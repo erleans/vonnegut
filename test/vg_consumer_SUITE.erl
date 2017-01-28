@@ -36,11 +36,11 @@ from_zero(_Config) ->
 
     ok = vg_client_pool:start(),
     ?assertMatch(#{topic := Topic, offset := 0},
-                 vg_client:produce(Topic, [<<"message 1 wasn't long enough to make wrapping fail">>,
-                                           <<"message 2">>])),
+                 vg_client:produce(Topic, [<<"record 1 wasn't long enough to make wrapping fail">>,
+                                           <<"record 2">>])),
 
-    #{partitions := [#{message_set := Data}]} = vg_client:fetch_until(Topic, 1),
-    ?assertMatch([#{id := 0, record := <<"message 1 wasn't long enough to make wrapping fail">>},
-                  #{id := 1, record := <<"message 2">>}], Data),
+    #{partitions := [#{record_set := Data}]} = vg_client:fetch_until(Topic, 1),
+    ?assertMatch([#{id := 0, record := <<"record 1 wasn't long enough to make wrapping fail">>},
+                  #{id := 1, record := <<"record 2">>}], Data),
     vg_client_pool:stop(),
     ok.

@@ -40,27 +40,27 @@ start_link(Topic, Partition, NextBrick) ->
     Tab = vg_pending_writes:ensure_tab(Topic, Partition),
     gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick, Tab], []).
 
-write(Topic, Partition, MessageSet) ->
+write(Topic, Partition, RecordSet) ->
     %% there clearly needs to be a lot more logic here.  it's also not
     %% clear that this is the right place for this
     try
-        gen_server:call(?SERVER(Topic, Partition), {write, MessageSet})
+        gen_server:call(?SERVER(Topic, Partition), {write, RecordSet})
     catch _:{noproc, _} ->
             lager:warning("write to nonexistent topic '~s', creating", [Topic]),
             {ok, _} = vonnegut_sup:create_topic(Topic),
-            write(Topic, Partition, MessageSet)
+            write(Topic, Partition, RecordSet)
     end.
 
 %% TODO: clean up the duplication from all this
-write(Sender, Topic, Partition, MessageSet) ->
+write(Sender, Topic, Partition, RecordSet) ->
     %% there clearly needs to be a lot more logic here.  it's also not
     %% clear that this is the right place for this
     try
-        gen_server:call(?SERVER(Topic, Partition), {write, Sender, MessageSet})
+        gen_server:call(?SERVER(Topic, Partition), {write, Sender, RecordSet})
     catch _:{noproc, _} ->
             lager:warning("sender write to nonexistent topic '~s', creating", [Topic]),
             {ok, _} = vonnegut_sup:create_topic(Topic),
-            write(Sender, Topic, Partition, MessageSet)
+            write(Sender, Topic, Partition, RecordSet)
     end.
 
 ack(Topic, Partition, LatestId) ->
@@ -113,32 +113,32 @@ init([Topic, Partition, NextServer, Tab]) ->
                 history_tab=Tab
                }}.
 
-handle_call({write, MessageSet}, _From, State=#state{topic=_Topic,
+handle_call({write, RecordSet}, _From, State=#state{topic=_Topic,
                                                      partition=_Partition,
                                                      next_brick=NextBrick}) ->
-    {FirstID, State1} = write_message_set(MessageSet, State),
+    {FirstID, State1} = write_record_set(RecordSet, State),
     case NextBrick of
         solo -> ok;
         tail -> ok;
         last -> ok;
         _ ->
-            gen_server:cast(NextBrick, {write, self(), MessageSet})
+            gen_server:cast(NextBrick, {write, self(), RecordSet})
     end,
     {reply, {ok, FirstID}, State1};
 handle_call(_Msg, _From, State) ->
     lager:info("bad call ~p ~p", [_Msg, _From]),
     {noreply, State}.
 
-handle_cast({write, Sender, MessageSet}, State=#state{topic=_Topic,
+handle_cast({write, Sender, RecordSet}, State=#state{topic=_Topic,
                                                       partition=_Partition,
                                                       next_brick=NextBrick}) ->
-    {_FirstID, State1} = write_message_set(MessageSet, State),
+    {_FirstID, State1} = write_record_set(RecordSet, State),
     case NextBrick of
         solo -> ok;
         tail -> ok;
         last -> ok;
         _ ->
-            gen_server:cast(NextBrick, {write, self(), MessageSet})
+            gen_server:cast(NextBrick, {write, self(), RecordSet})
     end,
 
     %% TODO: batch acks
@@ -163,10 +163,10 @@ code_change(_, State, _) ->
 
 %%
 
-write_message_set(MessageSet, State=#state{history_tab=Tab}) ->
-    {State#state.id, lists:foldl(fun(Message, StateAcc=#state{id=Id,
+write_record_set(RecordSet, State=#state{history_tab=Tab}) ->
+    {State#state.id, lists:foldl(fun(Record, StateAcc=#state{id=Id,
                                                               byte_count=ByteCount}) ->
-                                     {NextId, Size, Bytes} = vg_protocol:encode_message(Id, Message),
+                                     {NextId, Size, Bytes} = vg_protocol:encode_id_record(Id, Record),
                                      StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
                                      update_log(Bytes, StateAcc1),
                                      StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
@@ -176,7 +176,7 @@ write_message_set(MessageSet, State=#state{history_tab=Tab}) ->
 
                                      StateAcc3#state{id=NextId,
                                                      pos=Position1+Size}
-                                 end, State, MessageSet)}.
+                                 end, State, RecordSet)}.
 
 %% Create new log segment and index file if current segment is too large
 %% or if the index file is over its max and would be written to again.
@@ -213,8 +213,8 @@ maybe_roll(_, State) ->
     State.
 
 %% Append encoded log to segment
-update_log(Message, #state{log_fd=LogFile}) ->
-    ok = file:write(LogFile, Message).
+update_log(Record, #state{log_fd=LogFile}) ->
+    ok = file:write(LogFile, Record).
 
 %% Add to index if the number of bytes written to the log since the last index record was written
 update_index(State=#state{id=Id,
