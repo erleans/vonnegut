@@ -5,7 +5,7 @@
 -compile(export_all).
 
 all() ->
-    [creation, write, ack].
+    [creation, write].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -53,35 +53,3 @@ write(Config) ->
     ?assertMatch([#{record := Communist}], Reply),
     #{partitions := [#{record_set := Reply1}]} = vg_client:fetch_until(Topic, R1 - 1, R1),
     ?assertMatch([#{record := Anarchist}, #{record := Communist}], Reply1).
-
-ack(Config) ->
-    Topic = ?config(topic, Config),
-
-    %% write some random records to the topic
-    Msgs = [begin
-                Msg = crypto:strong_rand_bytes(60),
-                {ok, _Id} = vg:write(Topic, Msg),
-                Msg
-            end
-           || _ <- lists:seq(1, rand:uniform(20))],
-
-    %% verify written
-    #{record_set := Reply} = vg:fetch(Topic),
-    Records = [Record || #{record := Record} <- Reply],
-    ?assertEqual(Msgs, Records),
-
-    %% verify history
-    HistoryTab = binary_to_atom(<<Topic/binary, 0>>, utf8),
-    History = ets:tab2list(HistoryTab),
-    {_, HistoryMsgs} = lists:unzip(lists:sort(History)),
-    Header = vg_protocol:encode_fetch_response(Topic, 0, 0, length(Msgs), iolist_size(HistoryMsgs)),
-    #{partitions :=
-          [#{high_water_mark := HighWaterMark, % maybe not a good test
-             record_set := HistorySet}]} =
-        vg_protocol:decode_fetch_response(iolist_to_binary([Header, HistoryMsgs])),
-    ?assertEqual(Msgs, [Record || #{record := Record} <- HistorySet]),
-
-    %% Ack to the latest Id
-    vg_active_segment:ack(Topic, 0, HighWaterMark),
-    %% History should be empty now
-    ?assertEqual([], ets:tab2list(HistoryTab)).

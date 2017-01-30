@@ -177,8 +177,9 @@ write_record_set(RecordSet, State=#state{history_tab=Tab, next_brick=Next}) ->
                                      update_log(Bytes, StateAcc1),
                                      StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
                                      StateAcc3 = update_index(StateAcc2),
+                                         ct:pal("next ~p", [Next]),
                                      case Next of
-                                         solo -> ok;
+                                         %%solo -> ok;
                                          last -> ok;
                                          tail -> ok;
                                          _ ->
