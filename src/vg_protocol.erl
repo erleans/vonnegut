@@ -100,10 +100,10 @@ encode_log(Id, #{crc := CRC, record := Record}) ->
             lager:info("checksums don't match crc1=~p crc2=~p", [CRC, BadChecksum]),
             {error, bad_checksum}
     end;
-encode_log(Id, #{record := KeyValue}) ->
-    Record = encode_record(KeyValue, 0),
-    RecordSize = erlang:iolist_size(Record),
-    {Id+1, RecordSize+12, [<<Id:64/signed-integer, RecordSize:32/signed-integer>>, Record]}.
+encode_log(Id, #{record := Record}) ->
+    EncodedRecord = encode_record(Record, 0),
+    RecordSize = erlang:iolist_size(EncodedRecord),
+    {Id+1, RecordSize+12, [<<Id:64/signed-integer, RecordSize:32/signed-integer>>, EncodedRecord]}.
 
 encode_kv({Key, Value}) ->
     [encode_bytes(Key), encode_bytes(Value)];
@@ -259,16 +259,28 @@ decode_fetch_partition(<<Partition:32/signed-integer, ErrorCode:16/signed-intege
 decode_fetch_partition(_) ->
     more.
 
+%% TODO: validate recordsize
 decode_record_set(End, Acc) when End =:= eof orelse End =:= <<>> ->
     #{record_set := Set} = Acc,
     Acc#{record_set := lists:reverse(Set)};
 decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/signed-integer,
                      ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer, -1:32/signed-integer,
-                     ValueSize:32/signed-integer, KV:ValueSize/binary, Rest/binary>>, Acc) ->
+                     ValueSize:32/signed-integer, Value:ValueSize/binary, Rest/binary>>, Acc) ->
     #{record_set := Set,
       high_water_mark := Mark} = Acc,
     Mark1 = max(Id, Mark),
     Set1 = [#{id => Id,
               crc => Crc,
-              record => KV} | Set],
+              record => Value} | Set],
+    decode_record_set(Rest, Acc#{record_set := Set1, high_water_mark := Mark1});
+decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/signed-integer,
+                    ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer,
+                    KeySize:32/signed-integer, Key:KeySize/binary, ValueSize:32/signed-integer,
+                    Value:ValueSize/binary, Rest/binary>>, Acc) ->
+    #{record_set := Set,
+      high_water_mark := Mark} = Acc,
+    Mark1 = max(Id, Mark),
+    Set1 = [#{id => Id,
+              crc => Crc,
+              record => {Key, Value}} | Set],
     decode_record_set(Rest, Acc#{record_set := Set1, high_water_mark := Mark1}).
