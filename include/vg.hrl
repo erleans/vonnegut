@@ -1,7 +1,6 @@
 -define(CLIENT_ID, "vg_client").
 -define(MAX_REQUEST_ID, 4294967296).
 
--define(OFFSET, 0).
 -define(MAGIC, 0).
 -define(ATTRIBUTES, 0).
 -define(API_VERSION, 1).

@@ -76,10 +76,10 @@ encode_record_set([], _Compression) ->
     [];
 encode_record_set(Record, Compression) when is_binary(Record) ->
     Record2 = encode_record(Record, Compression),
-    [<<?OFFSET:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2];
+    [<<0:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2];
 encode_record_set([Record | T], Compression) ->
     Record2 = encode_record(Record, Compression),
-    [<<?OFFSET:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2 | encode_record_set(T, Compression)].
+    [<<0:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2 | encode_record_set(T, Compression)].
 
 encode_record(Record, _Compression) ->
     Record2 = [<<?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer>>, encode_kv(Record)],
@@ -161,7 +161,7 @@ decode_array(DecodeFun, N, Rest, Acc) ->
 
 decode_record_set(<<>>) ->
     [];
-decode_record_set(<<?OFFSET:64/signed-integer, Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
+decode_record_set(<<_:64/signed-integer, Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
     [decode_record(Record) | decode_record_set(Rest)].
 
 %% <<?MAGIC:8/signed-integer, Compression:8/signed-integer, -1:32/signed-integer, Size:32/signed-integer, Data:Size/binary>>
