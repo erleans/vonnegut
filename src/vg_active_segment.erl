@@ -37,6 +37,7 @@
 -define(SERVER(Topic, Partition), {via, gproc, {n,l,{Topic,Partition}}}).
 
 start_link(Topic, Partition, NextBrick) ->
+    %% worth the trouble of making sure we have no acks table on tails?
     Tab = vg_pending_writes:ensure_tab(Topic, Partition),
     gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick, Tab], []).
 
@@ -168,7 +169,7 @@ code_change(_, State, _) ->
 
 %%
 
-write_record_set(RecordSet, State=#state{history_tab=Tab}) ->
+write_record_set(RecordSet, State=#state{history_tab=Tab, next_brick=Next}) ->
     {State#state.id, lists:foldl(fun(Record, StateAcc=#state{id=Id,
                                                               byte_count=ByteCount}) ->
                                      {NextId, Size, Bytes} = vg_protocol:encode_log(Id, Record),
@@ -176,8 +177,13 @@ write_record_set(RecordSet, State=#state{history_tab=Tab}) ->
                                      update_log(Bytes, StateAcc1),
                                      StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
                                      StateAcc3 = update_index(StateAcc2),
-
-                                     vg_pending_writes:add(Tab, Id, Bytes),
+                                     case Next of
+                                         %%solo -> ok;
+                                         last -> ok;
+                                         tail -> ok;
+                                         _ ->
+                                             vg_pending_writes:add(Tab, Id, Bytes)
+                                     end,
 
                                      StateAcc3#state{id=NextId,
                                                      pos=Position1+Size}

@@ -24,7 +24,7 @@ fetch(Topic) ->
 
 fetch(Topic, Position) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
-    lager:info("fetch request to pool: ~p ~p", [Topic, Pool]),
+    lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
     shackle:call(Pool, {fetch, Topic, 0, Position}).
 
 fetch_until(Topic, Target) ->
@@ -32,7 +32,7 @@ fetch_until(Topic, Target) ->
 
 fetch_until(Topic, Position, Target) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
-    lager:info("fetch request to pool: ~p ~p", [Topic, Pool]),
+    lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
     Loop =
         fun Loop(#{partitions := [#{high_water_mark := Offset}]} = Acc) ->
                 Resp0 = shackle:call(Pool, {fetch, Topic, 0, Offset}),
@@ -61,7 +61,7 @@ merge_fetch_response(One, Two) ->
 
 produce(Topic, RecordSet) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, write),
-    lager:info("produce request to pool: ~p ~p", [Topic, Pool]),
+    lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
     shackle:call(Pool, {produce, Topic, 0, RecordSet}).
 
 -spec init() -> {ok, term()}.
@@ -121,7 +121,7 @@ handle_data(Data, State=#state{buffer=Buffer,
             {ok, [], State#state{buffer = <<Buffer/binary, Data/binary>>}};
         {CorrelationId, Response, Rest} ->
             Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
-            lager:info("cli result ~p ~p", [Response, Result]),
+            lager:debug("cli result ~p ~p", [Response, Result]),
             {ok, [{CorrelationId, Result}], State#state{corids = maps:remove(CorrelationId, CorIds),
                                                         buffer = Rest}}
     end.
