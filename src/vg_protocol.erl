@@ -259,6 +259,7 @@ decode_fetch_partition(<<Partition:32/signed-integer, ErrorCode:16/signed-intege
 decode_fetch_partition(_) ->
     more.
 
+%% TODO: validate recordsize
 decode_record_set(End, Acc) when End =:= eof orelse End =:= <<>> ->
     #{record_set := Set} = Acc,
     Acc#{record_set := lists:reverse(Set)};
