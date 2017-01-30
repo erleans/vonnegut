@@ -53,14 +53,16 @@ produce(Config) ->
     ok = vg:create_topic(Topic),
     brod:start_producer(brod_client_1, Topic, []),
 
+    Key = <<"I'm a key">>,
     M = <<"hello from brod">>,
     brod:produce_sync(brod_client_1,
                       Topic,
                       0,
-                      <<>>,
+                      Key,
                       M),
 
-    ?assertMatch({ok, [#kafka_message{value=M} | _]}, brod:fetch(Hosts, Topic, 0, 0)),
+    ?assertMatch({ok, [#kafka_message{key=Key,
+                                      value=M} | _]}, brod:fetch(Hosts, Topic, 0, 0)),
 
 
     ok.
