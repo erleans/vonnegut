@@ -109,11 +109,8 @@ groups() ->
      {operations,
       [],
       [
-       roles
-       %% start_predefined
-       %% start_dynamic
-       %% terminate_dynamic
-       %% kill_random
+       roles,
+       acks
       ]}
 
     ].
@@ -158,8 +155,31 @@ roles(Config) ->
     ?assertMatch({error, socket_closed},
                  shackle:call(middle_end, {fetch, <<"foo">>, 0, 12})),
 
+    shackle_pool:stop(middle_end),
     Config.
 
+acks(Config) ->
+    [vg_client:produce(<<"foo">>, <<"bar", (integer_to_binary(N))/binary>>)
+     || N <- lists:seq(1, 20)],
+
+    ?assertMatch(ok, check_acks(1000)),
+
+    Config.
+
+check_acks(Timeout) when Timeout =< 0 ->
+    {error, timeout};
+check_acks(Timeout) ->
+    Info0 = rpc:call('chain1-0@127.0.0.1', ets, info, [foo0, size]),
+    Info1 = rpc:call('chain1-1@127.0.0.1', ets, info, [foo0, size]),
+    Info2 = rpc:call('chain1-2@127.0.0.1', ets, info, [foo0, size]),
+    ct:pal("ack info: ~p ~p ~p", [Info0, Info1, Info2]),
+
+    case Info0 == 0 andalso Info1 == 0 andalso Info2 == 0 of
+        true -> ok;
+        _ ->
+            timer:sleep(50),
+            check_acks(Timeout - 50)
+    end.
 
 sync_cmd(Name, Cmd, Env) ->
     P = open_port({spawn, Cmd},

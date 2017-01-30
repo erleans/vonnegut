@@ -27,18 +27,18 @@ start() ->
     %% maybe start this if it hasn't been
     application:start(shackle),
     Cluster = get_cluster(),
-    lager:info("cluster: ~p", [Cluster]),
+    lager:debug("cluster: ~p", [Cluster]),
     maybe_init_ets(),
     Chains = start_pools(Cluster),
-    lager:info("chains: ~p", [Chains]),
+    lager:debug("chains: ~p", [Chains]),
     application:set_env(vonnegut, chains, Chains),
     refresh_topic_map(),
-    lager:info("OK"),
+    lager:debug("OK"),
     ok.
 
 start_pools(Chains) ->
     [begin
-         lager:info("starting chain: ~p", [Chain]),
+         lager:debug("starting chain: ~p", [Chain]),
          HeadName = make_pool_name(Chain#chain.name, write),
          start_pool(HeadName, #{ip => Chain#chain.head_host,
                             port => Chain#chain.head_port}),
@@ -50,7 +50,7 @@ start_pools(Chains) ->
      || Chain <- Chains].
 
 refresh_topic_map() ->
-    lager:info("refreshing client topic map", []),
+    lager:debug("refreshing client topic map", []),
     maybe_init_ets(clean),
     TopicList = [begin
                      Pool = make_pool_name(Chain, read),
@@ -77,24 +77,23 @@ get_pool(Topic, RW, Try) ->
                     %% just make it up for now  TODO: make this a settable
                     %% behavior serverside
                     [{_, Default}] = ets:lookup(?topic_map, <<>>),
-                    lager:info("default pool: ~p ~p", [Topic, Default]),
+                    lager:debug("default pool: ~p ~p", [Topic, Default]),
                     {ok, make_pool_name(Default, RW)};
                 {read, first} ->
                     refresh_topic_map(),
                     get_pool(Topic, RW, second);
                 {read, second} ->
-                    lager:info("not found chain: ~p", [Topic]),
+                    lager:debug("not found chain: ~p", [Topic]),
                     {error, not_found}
             end;
         %%{error, not_found};
         [{_, Chain}] ->
             Pool = make_pool_name(Chain, RW),
-            lager:info("found chain: ~p ~p", [Topic, Pool]),
+            lager:debug("found chain: ~p ~p", [Topic, Pool]),
             {ok, Pool}
     end.
 
 make_pool_name(Chain, read) ->
-    %% lager:info("making pool name ~p", [Chain]),
     binary_to_atom(<<Chain/binary, "_tail">>, utf8);
 make_pool_name(Chain, write) ->
     binary_to_atom(<<Chain/binary, "_head">>, utf8).

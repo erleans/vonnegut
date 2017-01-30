@@ -5,13 +5,16 @@
          add/3]).
 
 -define(TAB_OPTIONS, [public, named_table, bag, {write_concurrency, true}]).
--define(TAB(Topic, Partition), binary_to_atom(<<Topic/binary, Partition>>, utf8)).
+-define(TAB(Topic, Partition), binary_to_atom(<<Topic/binary,
+                                                (integer_to_binary(Partition))/binary>>,
+                                              utf8)).
 
 -spec ensure_tab(Topic :: binary(), Partition :: integer()) -> atom().
 ensure_tab(Topic, Partition) ->
     Tab = ?TAB(Topic, Partition),
     case ets:info(Tab, name) of
         undefined ->
+            lager:debug("starting new acks table: ~p", [Tab]),
             ets:new(Tab, ?TAB_OPTIONS);
         _ ->
             ok
@@ -20,6 +23,7 @@ ensure_tab(Topic, Partition) ->
 
 -spec ack(Topic :: binary(), Partition :: integer(), LatestId :: integer()) -> integer().
 ack(Topic, Partition, LatestId) ->
+    lager:debug("ack getting called on ~p ~s:~p with id ~p", [node(), Topic, Partition, LatestId]),
     ets:select_delete(?TAB(Topic, Partition), [{{'$1', '$2'},
                                                 [{is_integer, '$1'}, {'=<', '$1', LatestId}],
                                                 [true]}]).
