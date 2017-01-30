@@ -4,6 +4,8 @@
 -include_lib("common_test/include/ct.hrl").
 -compile(export_all).
 
+-include("vg.hrl").
+
 all() ->
     [record_set_larger_than_max_segment].
 
@@ -31,8 +33,7 @@ record_set_larger_than_max_segment(_Config) ->
     vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
-    RandomRecords = [#{crc => erlang:crc32(M),
-                        record => M}
+    RandomRecords = [#{record => M}
                       || M <- [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
                                crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
                                crypto:strong_rand_bytes(60)]],

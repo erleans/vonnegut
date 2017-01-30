@@ -4,6 +4,8 @@
 -include_lib("common_test/include/ct.hrl").
 -compile(export_all).
 
+-include("vg.hrl").
+
 all() ->
     [delete_policy].
 
@@ -31,8 +33,7 @@ delete_policy(_Config) ->
     vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
-    RandomRecords = [#{crc => erlang:crc32(M),
-                       record => M}
+    RandomRecords = [#{record => M}
                       || M <- [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60)]],
     vg:write(Topic, RandomRecords),
 

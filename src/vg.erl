@@ -6,8 +6,10 @@
          fetch/2,
          fetch/1]).
 
--type record() :: #{id := integer(),
-                    crc := integer(),
+-include("vg.hrl").
+
+-type record() :: #{id => integer(),
+                    crc => integer(),
                     record := binary() | {binary(), binary()}}.
 -type record_set() :: [record()].
 
@@ -27,10 +29,9 @@ ensure_topic(Topic) ->
 
 -spec write(Topic, Record) -> ok | {error, any()} when
       Topic :: binary(),
-      Record :: binary() | [#{crc := integer(), record := binary()}].
+      Record :: binary() | record_set().
 write(Topic, Record) when is_binary(Record) ->
-    vg_active_segment:write(Topic, 0, [#{crc => erlang:crc32(Record),
-                                         record => Record}]);
+    vg_active_segment:write(Topic, 0, [#{record => Record}]);
 write(Topic, RecordSet) when is_list(RecordSet) ->
     vg_active_segment:write(Topic, 0, RecordSet).
 
