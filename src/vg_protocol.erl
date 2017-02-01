@@ -40,7 +40,7 @@ encode_topic_data(TopicData) ->
 
 encode_data(Data) ->
     encode_array([begin
-                      RecordSetEncoded = encode_record_set(RecordSet, 0),
+                      RecordSetEncoded = encode_record_set(RecordSet),
                       [<<Partition:32/signed-integer, (iolist_size(RecordSetEncoded)):32/signed-integer>>, RecordSetEncoded]
                   end || {Partition, RecordSet} <- Data]).
 
@@ -72,17 +72,17 @@ encode_bytes(undefined) ->
 encode_bytes(Data) ->
     [<<(size(Data)):32/signed-integer>>, Data].
 
-encode_record_set([], _Compression) ->
+encode_record_set([]) ->
     [];
-encode_record_set(Record, Compression) when is_binary(Record) ->
-    Record2 = encode_record(Record, Compression),
+encode_record_set(Record) when is_binary(Record) ->
+    Record2 = encode_record(Record),
     [<<0:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2];
-encode_record_set([Record | T], Compression) ->
-    Record2 = encode_record(Record, Compression),
-    [<<0:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2 | encode_record_set(T, Compression)].
+encode_record_set([Record | T]) ->
+    Record2 = encode_record(Record),
+    [<<0:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2 | encode_record_set(T)].
 
-encode_record(Record, _Compression) ->
-    Record2 = [<<?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer>>, encode_kv(Record)],
+encode_record(Record) ->
+    Record2 = [<<?MAGIC:8/signed-integer, 0:8/signed-integer>>, encode_kv(Record)],
     [<<(erlang:crc32(Record2)):32/unsigned-integer>>, Record2].
 
 %% <<Id:64, RecordSize:32, Crc:32, MagicByte:8, Attributes:8, Key/Value>>
@@ -101,7 +101,7 @@ encode_log(Id, #{crc := CRC, record := Record}) ->
             {error, bad_checksum}
     end;
 encode_log(Id, #{record := Record}) ->
-    EncodedRecord = encode_record(Record, 0),
+    EncodedRecord = encode_record(Record),
     RecordSize = erlang:iolist_size(EncodedRecord),
     {Id+1, RecordSize+12, [<<Id:64/signed-integer, RecordSize:32/signed-integer>>, EncodedRecord]}.
 
@@ -249,38 +249,38 @@ decode_fetch_partition(<<Partition:32/signed-integer, ErrorCode:16/signed-intege
     %% there are a number of fields that we're not including currently:
     %% - throttle time
     %% - topic name
-    {decode_record_set(RecordSet,
-                        #{high_water_mark => HighWaterMark,
-                          partition => Partition,
-                          record_set_size => Bytes,
-                          error_code => ErrorCode,
-                          record_set => []
-                         }), Rest};
+    {#{high_water_mark => HighWaterMark,
+       partition => Partition,
+       record_set_size => Bytes,
+       error_code => ErrorCode,
+       record_set => decode_record_set(RecordSet, [])}, Rest};
 decode_fetch_partition(_) ->
     more.
 
 %% TODO: validate recordsize
-decode_record_set(End, Acc) when End =:= eof orelse End =:= <<>> ->
-    #{record_set := Set} = Acc,
-    Acc#{record_set := lists:reverse(Set)};
+decode_record_set(End, Set) when End =:= eof orelse End =:= <<>> ->
+    lists:reverse(Set);
 decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/signed-integer,
-                     ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer, -1:32/signed-integer,
-                     ValueSize:32/signed-integer, Value:ValueSize/binary, Rest/binary>>, Acc) ->
-    #{record_set := Set,
-      high_water_mark := Mark} = Acc,
-    Mark1 = max(Id, Mark),
-    Set1 = [#{id => Id,
-              crc => Crc,
-              record => Value} | Set],
-    decode_record_set(Rest, Acc#{record_set := Set1, high_water_mark := Mark1});
+                    ?MAGIC:8/signed-integer, Attributes:8/signed-integer, -1:32/signed-integer,
+                    ValueSize:32/signed-integer, Value:ValueSize/binary, Rest/binary>>, Set) ->
+    case ?COMPRESSION(Attributes) of
+        ?COMPRESS_NONE ->
+            decode_record_set(Rest, [#{id => Id,
+                                       crc => Crc,
+                                       record => Value} | Set]);
+        ?COMPRESS_GZIP ->
+            decode_record_set(Rest, decode_record_set(zlib:gunzip(Value), Set));
+        ?COMPRESS_SNAPPY ->
+            decode_record_set(Rest, decode_record_set(snappyer:decompress(Value), Set));
+        ?COMPRESS_LZ4 ->
+            decode_record_set(Rest, decode_record_set(lz4:unpack(Value), Set))
+    end;
+%% compression only allowed if key is null
 decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/signed-integer,
-                    ?MAGIC:8/signed-integer, ?ATTRIBUTES:8/signed-integer,
+                    ?MAGIC:8/signed-integer, _Attributes:8/signed-integer,
                     KeySize:32/signed-integer, Key:KeySize/binary, ValueSize:32/signed-integer,
-                    Value:ValueSize/binary, Rest/binary>>, Acc) ->
-    #{record_set := Set,
-      high_water_mark := Mark} = Acc,
-    Mark1 = max(Id, Mark),
-    Set1 = [#{id => Id,
-              crc => Crc,
-              record => {Key, Value}} | Set],
-    decode_record_set(Rest, Acc#{record_set := Set1, high_water_mark := Mark1}).
+                    Value:ValueSize/binary, Rest/binary>>, Set) ->
+    ct:pal("KEY ~p ~p", [Key, Value]),
+    decode_record_set(Rest, [#{id => Id,
+                               crc => Crc,
+                               record => {Key, Value}} | Set]).
