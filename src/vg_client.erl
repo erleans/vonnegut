@@ -3,7 +3,6 @@
 %%-behavior(shackle_client). ?
 
 -export([fetch/1, fetch/2,
-         fetch_until/2, fetch_until/3,
          produce/2,
          init/0,
          setup/2,
@@ -26,38 +25,6 @@ fetch(Topic, Position) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
     shackle:call(Pool, {fetch, Topic, 0, Position}).
-
-fetch_until(Topic, Target) ->
-    fetch_until(Topic, 0, Target).
-
-fetch_until(Topic, Position, Target) ->
-    {ok, Pool} = vg_client_pool:get_pool(Topic, read),
-    lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    Loop =
-        fun Loop(#{partitions := [#{high_water_mark := Offset}]} = Acc) ->
-                Resp0 = shackle:call(Pool, {fetch, Topic, 0, Offset}),
-                Resp = merge_fetch_response(Acc, Resp0),
-                #{partitions := [#{high_water_mark := Mark}]} = Resp,
-                case Mark >= Target of
-                    true ->
-                        Resp;
-                    _ ->
-                        #{partitions := [Part0]} = Resp,
-                        Part = Part0#{high_water_mark => Mark + 1},
-                        Loop(Resp#{partitions := [Part]})
-                end
-        end,
-    Loop(#{topic => Topic, partitions => [#{record_set => [],
-                                            high_water_mark => Position}]}).
-
-merge_fetch_response(One, Two) ->
-    %% TODO: this will need to be more sophisticated to handle
-    %% multiple partitions
-    #{partitions := [#{record_set := Set1}]} = One,
-    #{partitions := [#{record_set := Set2} = Part]} = Two,
-    %% we assume ordering here, so Two's mark will be larger than
-    %% One's, and when we append we'll preserve ordering.
-    Two#{partitions := [Part#{record_set := lists:append(Set1, Set2)}]}.
 
 produce(Topic, RecordSet) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, write),
