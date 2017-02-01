@@ -280,7 +280,6 @@ decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/
                     ?MAGIC:8/signed-integer, _Attributes:8/signed-integer,
                     KeySize:32/signed-integer, Key:KeySize/binary, ValueSize:32/signed-integer,
                     Value:ValueSize/binary, Rest/binary>>, Set) ->
-    ct:pal("KEY ~p ~p", [Key, Value]),
     decode_record_set(Rest, [#{id => Id,
                                crc => Crc,
                                record => {Key, Value}} | Set]).

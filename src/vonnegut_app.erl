@@ -17,6 +17,7 @@
 
 start(_StartType, _StartArgs) ->
     vg_log_segments:init_table(),
+    vg_topics:init_table(),
     vonnegut_sup:start_link().
 
 %%--------------------------------------------------------------------

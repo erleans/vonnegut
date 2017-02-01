@@ -50,6 +50,6 @@ write(Config) ->
     #{topic := Topic, offset := R1} = vg_client:produce(Topic, Communist),
     ct:pal("reply: ~p", [R1]),
     #{partitions := [#{record_set := Reply}]} = vg_client:fetch(Topic, R1),
-    ?assertMatch([#{record := Communist}], Reply),
-    #{partitions := [#{record_set := Reply1}]} = vg_client:fetch_until(Topic, R1 - 1, R1),
-    ?assertMatch([#{record := Anarchist}, #{record := Communist}], Reply1).
+    ?assertMatch([#{record := Communist}], Reply).
+    %% #{partitions := [#{record_set := Reply1}]} = vg_client:fetch_until(Topic, R1 - 1, R1),
+    %% ?assertMatch([#{record := Anarchist}, #{record := Communist}], Reply1).

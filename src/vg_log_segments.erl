@@ -7,11 +7,12 @@
          find_log_segment/3,
          find_active_segment/2,
          find_segment_offset/3,
-         find_record_offset/4]).
+         find_record_offset/4,
+         new_index_log_files/2,
+         find_latest_id/3]).
 
 -include("vg.hrl").
 
-%% log segment servers are index as {Topic,Partition,SegmentId}
 -define(LOG_SEGMENT_MATCH_PATTERN(Topic, Partition), {Topic,Partition,'$1'}).
 -define(LOG_SEGMENT_GUARD(RecordId), [{is_integer, '$1'}, {'=<', '$1', RecordId}]).
 -define(LOG_SEGMENT_RETURN, ['$1']).
@@ -23,10 +24,15 @@ load_all(Topic, Partition) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     case filelib:wildcard(filename:join(TopicDir, "*.log")) of
         [] ->
-            insert(Topic, Partition, 0);
+            insert(Topic, Partition, 0),
+            vg_topics:insert_hwm(Topic, Partition, 0);
         LogSegments ->
-            [insert(Topic, Partition, list_to_integer(filename:basename(LogSegment, ".log")))
-            || LogSegment <- LogSegments]
+            [begin
+                 SegmentId = list_to_integer(filename:basename(LogSegment, ".log")),
+                 insert(Topic, Partition, SegmentId)
+             end || LogSegment <- LogSegments],
+            {HWM, _, _} = find_latest_id(TopicDir, Topic, Partition),
+            vg_topics:insert_hwm(Topic, Partition, HWM)
     end.
 
 insert(Topic, Partition, SegmentId) ->
@@ -116,3 +122,63 @@ find_in_log(Log, Id, Position, {ok, <<_:64/signed, Size:32/signed>>}) ->
     end;
 find_in_log(_, _, _, _) ->
     0.
+
+find_latest_id(TopicDir, Topic, Partition) ->
+    SegmentId = vg_log_segments:find_active_segment(Topic, Partition),
+    IndexFilename = vg_utils:index_file(TopicDir, SegmentId),
+    {Offset, Position} = last_in_index(TopicDir, IndexFilename, SegmentId),
+    LogSegmentFilename = vg_utils:log_file(TopicDir, SegmentId),
+    {ok, Log} = vg_utils:open_read(LogSegmentFilename),
+    try
+        NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
+        {NewId+SegmentId, IndexFilename, LogSegmentFilename}
+    after
+        file:close(Log)
+    end.
+
+%% Rolling log and index files, so open new empty ones for appending
+new_index_log_files(TopicDir, Id) ->
+    IndexFilename = vg_utils:index_file(TopicDir, Id),
+    LogFilename = vg_utils:log_file(TopicDir, Id),
+
+    lager:debug("opening new log files: ~p ~p ~p", [Id, IndexFilename, LogFilename]),
+    %% Make sure empty?
+    {ok, IndexFile} = vg_utils:open_append(IndexFilename),
+    {ok, LogFile} = vg_utils:open_append(LogFilename),
+    {IndexFile, LogFile}.
+
+
+last_in_index(TopicDir, IndexFilename, SegmentId) ->
+    case vg_utils:open_read(IndexFilename) of
+        {error, enoent} when SegmentId =:= 0 ->
+            %% Index file doesn't exist, if this is the first segment (0)
+            %% we can just create the files assuming this is a topic creation.
+            %% Will fail if an empty topic-partition dir exists on boot since
+            %% vg_topic_sup will not be started yet.
+            {NewIndexFile, NewLogFile} = new_index_log_files(TopicDir, SegmentId),
+            file:close(NewIndexFile),
+            file:close(NewLogFile),
+            {0, 0};
+        {ok, Index} ->
+            try
+                case file:pread(Index, {eof, 6}, 6) of
+                    {ok, <<Offset:24/signed, Position:24/signed>>} ->
+                        {Offset, Position};
+                    _ ->
+                        {0, 0}
+                end
+            after
+                file:close(Index)
+            end
+    end.
+
+%% Find the Id for the last log in the log file Log
+find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
+    case file:read(Log, Size + 12) of
+        {ok, <<_:Size/binary, Data:12/binary>>} ->
+            find_last_log(Log, NewId, {ok, Data});
+        _ ->
+            NewId+1
+    end;
+find_last_log(_Log, Id, _) ->
+    Id.
