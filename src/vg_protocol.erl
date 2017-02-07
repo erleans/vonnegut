@@ -267,7 +267,7 @@ decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/
         ?COMPRESS_NONE ->
             decode_record_set(Rest, [#{id => Id,
                                        crc => Crc,
-                                       record => Value} | Set]);
+                                       record => binary:copy(Value)} | Set]);
         ?COMPRESS_GZIP ->
             decode_record_set(Rest, decode_record_set(zlib:gunzip(Value), Set));
         ?COMPRESS_SNAPPY ->
@@ -282,4 +282,4 @@ decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/
                     Value:ValueSize/binary, Rest/binary>>, Set) ->
     decode_record_set(Rest, [#{id => Id,
                                crc => Crc,
-                               record => {Key, Value}} | Set]).
+                               record => {binary:copy(Key), binary:copy(Value)}} | Set]).
