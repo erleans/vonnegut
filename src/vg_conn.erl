@@ -137,7 +137,7 @@ handle_request(?FETCH_REQUEST, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTim
     try
         Bytes = filelib:file_size(File) - Position,
         ErrorCode = 0,
-        HighWaterMark = 0,
+        HighWaterMark = vg_topics:lookup_hwm(Topic, Partition),
         Response = vg_protocol:encode_fetch_response(Topic, Partition, ErrorCode, HighWaterMark, Bytes),
         gen_tcp:send(Socket, [<<(Bytes + 4 + iolist_size(Response)):32/signed-integer,
                                 CorrelationId:32/signed-integer>>, Response]),

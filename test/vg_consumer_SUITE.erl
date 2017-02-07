@@ -39,8 +39,13 @@ from_zero(_Config) ->
                  vg_client:produce(Topic, [{<<"key">>, <<"record 1 wasn't long enough to make wrapping fail">>},
                                            <<"record 2">>])),
 
-    #{partitions := [#{record_set := Data}]} = vg_client:fetch_until(Topic, 1),
-    ?assertMatch([#{id := 0, record := {<<"key">>, <<"record 1 wasn't long enough to make wrapping fail">>}},
-                  #{id := 1, record := <<"record 2">>}], Data),
+    #{partitions := [#{record_set := Data,
+                       high_water_mark := HWM}]} = vg_client:fetch(Topic, 0),
+    ?assertEqual(1, HWM),
+    ?assertMatch([#{id := 0, record := {<<"key">>, <<"record 1 wasn't long enough to make wrapping fail">>}}], Data),
+    #{partitions := [#{record_set := Data1,
+                       high_water_mark := HWM1}]} = vg_client:fetch(Topic, 1),
+    ?assertEqual(1, HWM1),
+    ?assertMatch([#{id := 1, record := <<"record 2">>}], Data1),
     vg_client_pool:stop(),
     ok.

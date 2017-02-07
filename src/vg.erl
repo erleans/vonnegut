@@ -52,8 +52,6 @@ fetch(Topic, Offset) ->
     {ok, Fd} = file:open(File, [read, binary, raw]),
     {ok, [Data]} = file:pread(Fd, [{Position, Size}]),
     file:close(Fd),
-    vg_protocol:decode_record_set(Data,
-                                   #{high_water_mark => Offset,
-                                     partition => 0,
-                                     record_set => []
-                                    }).
+    #{high_water_mark => vg_topics:lookup_hwm(Topic, Partition),
+      partition => 0,
+      record_set => vg_protocol:decode_record_set(Data, [])}.
