@@ -2,67 +2,68 @@
 
 -export([start/0,
          stop/0,
+         get_pool/0,
          get_pool/2,
          refresh_topic_map/0]).
 
 -ifdef(TEST).
-
 -export([start_pool/2]).
-
 -endif.
 
--define(topic_map, topic_map).
+-include("vg.hrl").
 
 -define(OPTIONS, [set, public, named_table, {read_concurrency, true}]).
-
--record(chain, {
-          name :: binary(),
-          head_host :: inet:ip_address() | inet:hostname(),
-          head_port :: inet:port_number(),
-          tail_host :: inet:ip_address() | inet:hostname(),
-          tail_port :: inet:port_number()
-         }).
 
 start() ->
     %% maybe start this if it hasn't been
     application:start(shackle),
-    Cluster = get_cluster(),
-    lager:debug("cluster: ~p", [Cluster]),
-    maybe_init_ets(),
-    Chains = start_pools(Cluster),
-    lager:debug("chains: ~p", [Chains]),
-    application:set_env(vonnegut, chains, Chains),
-    refresh_topic_map(),
-    lager:debug("OK"),
-    ok.
+    case application:get_env(vonnegut, client) of
+        {ok, ClientConfig} ->
+            case proplists:get_value(endpoints, ClientConfig) of
+                undefined ->
+                    lager:error("No endpoints configured for client");
+                [{Host, Port} | _] ->
+                    start_pool(metadata, #{ip => Host,
+                                           port => Port}),
+                    {Chains, Topics} = vg_client:metadata(),
+                    maybe_init_ets(),
+                    _ = start_pools(Chains),
+                    application:set_env(vonnegut, chains, Chains),
+                    refresh_topic_map(Topics, Chains),
+                    ok
+            end;
+        _ ->
+            lager:info("No client configuration")
+    end.
 
 start_pools(Chains) ->
     [begin
          lager:debug("starting chain: ~p", [Chain]),
-         HeadName = make_pool_name(Chain#chain.name, write),
-         start_pool(HeadName, #{ip => Chain#chain.head_host,
-                            port => Chain#chain.head_port}),
-         TailName = make_pool_name(Chain#chain.name, read),
-         start_pool(TailName, #{ip => Chain#chain.tail_host,
-                            port => Chain#chain.tail_port}),
-         Chain#chain.name
+         HeadName = make_pool_name(Name, write),
+         {HeadHost, HeadPort} = Chain#chain.head,
+         start_pool(HeadName, #{ip => HeadHost,
+                                port => HeadPort}),
+         TailName = make_pool_name(Name, read),
+         {TailHost, TailPort} = Chain#chain.tail,
+         start_pool(TailName, #{ip => TailHost,
+                                port => TailPort})
      end
-     || Chain <- Chains].
+     || {Name, Chain} <- maps:to_list(Chains)].
 
 refresh_topic_map() ->
+    {Chains, Topics} = vg_client:metadata(),
+    _ = start_pools(Chains),
+    refresh_topic_map(Topics, Chains).
+
+refresh_topic_map(Topics, Chains) ->
     lager:debug("refreshing client topic map", []),
     maybe_init_ets(clean),
-    TopicList = [begin
-                     Pool = make_pool_name(Chain, read),
-                     Topics = shackle:call(Pool, topics),
-                     {Chain, Topics}
-                 end
-                 || Chain <- application:get_env(vonnegut, chains, [])],
-    _ = [[ets:insert(?topic_map, {Topic, Chain}) || Topic <- Topics]
-         || {Chain, Topics} <- TopicList],
-    %% hacky default,
-    [{Chain1, _} | _] = TopicList,
-    ets:insert(?topic_map, {<<>>, Chain1}).
+    [make_pool_name(Chain, read) || Chain <- maps:keys(Chains)],
+    _ = [ets:insert(?topic_map, {Topic, Chain}) || {Topic, Chain} <- maps:to_list(Topics)].
+
+get_pool() ->
+    Key = ets:first(?topic_map),
+    get_pool(Key, read).
 
 get_pool(Topic, RW) ->
     get_pool(Topic, RW, first).
@@ -73,20 +74,17 @@ get_pool(Topic, RW, Try) ->
     case ets:lookup(?topic_map, Topic) of
         [] ->
             case {RW, Try} of
-                {write, _} ->
-                    %% just make it up for now  TODO: make this a settable
-                    %% behavior serverside
-                    [{_, Default}] = ets:lookup(?topic_map, <<>>),
-                    lager:debug("default pool: ~p ~p", [Topic, Default]),
-                    {ok, make_pool_name(Default, RW)};
+                {write, first} ->
+                    vg_client:ensure_topic(Topic),
+                    refresh_topic_map(),
+                    get_pool(Topic, RW, second);
                 {read, first} ->
                     refresh_topic_map(),
                     get_pool(Topic, RW, second);
-                {read, second} ->
+                {_, second} ->
                     lager:debug("not found chain: ~p", [Topic]),
                     {error, not_found}
             end;
-        %%{error, not_found};
         [{_, Chain}] ->
             Pool = make_pool_name(Chain, RW),
             lager:debug("found chain: ~p ~p", [Topic, Pool]),
@@ -134,52 +132,3 @@ stop() ->
      || Pool <- application:get_env(vonnegut, client_pools, [])].
 
 %%%%%%%%%%%%%%%%%%
-
-get_cluster() ->
-    %% this works for now, but I guess we'll eventually need to move
-    %% this client out into being something that someone else can use,
-    %% when we'll need to change how the state gets in.
-    Cluster =
-        case application:get_env(vonnegut, cluster, undefined) of
-            undefined ->
-                %% we need a name here, what makes sense for single
-                %% node testing?
-                [#chain{name = <<"local">>,
-                        head_host = "127.0.0.1",
-                        head_port = 5555,
-                        tail_host = "127.0.0.1",
-                        tail_port = 5555}]; % assume local run if unset
-            RawCluster ->
-                raw_to_chains(RawCluster)
-        end,
-    Cluster.
-
-raw_to_chains({direct, Nodes}) ->
-    ParsedNodes = [parse_name(Node) || Node <- Nodes],
-    Chains = ordsets:from_list([Chain || {Chain, _, _, _} <- ParsedNodes]),
-    [make_chain(Chain, ParsedNodes)
-     || Chain <- Chains];
-raw_to_chains(local) ->
-    [#chain{name = <<"local">>,
-            head_host = "127.0.0.1",
-            head_port = 5555,
-            tail_host = "127.0.0.1",
-            tail_port = 5555}].
-
-parse_name({Name0, Host, Port}) ->
-    %% this especially is likely to cause problems if we allow
-    %% arbitrary chain naming
-    Name = atom_to_list(Name0),
-    [Chain, Pos] = string:tokens(Name, "-"),
-    {Chain, list_to_integer(Pos), Host, Port}.
-
-make_chain(Chain, Nodes0) ->
-    Nodes = [Node || Node = {C, _, _, _} <- Nodes0, C =:= Chain],
-    Len = length(Nodes),
-    {value, {_, _, Head, HeadPort}} = lists:keysearch(0, 2, Nodes),
-    {value, {_, _, Tail, TailPort}} = lists:keysearch(Len - 1, 2, Nodes),
-    #chain{name = list_to_binary(Chain),
-           head_host = Head,
-           head_port = HeadPort,
-           tail_host = Tail,
-           tail_port = TailPort}.

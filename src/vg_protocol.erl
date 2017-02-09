@@ -4,6 +4,7 @@
          encode_produce/3,
          encode_request/4,
          encode_metadata_response/2,
+         encode_metadata_request/1,
 
          encode_array/1,
          encode_log/2,
@@ -54,6 +55,9 @@ encode_partitions(Partitions) ->
 encode_request(ApiKey, CorrelationId, ClientId, Request) ->
     [<<ApiKey:16/signed-integer, ?API_VERSION:16/signed-integer, CorrelationId:32/signed-integer>>,
      encode_string(ClientId), Request].
+
+encode_metadata_request(Topics) ->
+    encode_array([encode_string(Topic) || Topic <- Topics]).
 
 %% generic encode functions
 
@@ -133,7 +137,7 @@ encode_metadata_response(Brokers, TopicMetadata) ->
 
 encode_brokers(Brokers) ->
     encode_array([[<<NodeId:32/signed-integer>>, encode_string(Host), <<Port:32/signed-integer>>]
-                 || {NodeId, Host, Port} <- Brokers]).
+                 || {NodeId, {Host, Port}} <- Brokers]).
 
 encode_topic_metadata(TopicMetadata) ->
     encode_array([[<<TopicErrorCode:16/signed-integer>>, encode_string(Topic), encode_partition_metadata(PartitionMetadata)]
@@ -158,6 +162,9 @@ decode_array(DecodeFun, N, Rest, Acc) ->
             decode_array(DecodeFun, N-1, Rest1, [Element | Acc]);
         more -> more
     end.
+
+decode_int32(<<I:32/signed-integer, Rest/binary>>) ->
+    {I, Rest}.
 
 decode_record_set(<<>>) ->
     [];
@@ -200,7 +207,53 @@ decode_response(?FETCH_REQUEST, Response) ->
 decode_response(?PRODUCE_REQUEST, Response) ->
     decode_produce_response(Response);
 decode_response(?TOPICS_REQUEST, Response) ->
-    decode_topics_response(Response).
+    decode_topics_response(Response);
+decode_response(?METADATA_REQUEST, Response) ->
+    decode_metadata_response(Response).
+
+decode_metadata_response(Response) ->
+    {Brokers, Rest} = decode_array(fun decode_metadata_response_brokers/1, Response),
+    {TopicMetadata, _}= decode_array(fun decode_metadata_response_topic_metadata/1, Rest),
+
+    %% The response will use leader as the head node and the first element in isrs as the tail
+    %% We use the head host node as the name of the chain
+    {Chains, Topics} = lists:foldl(fun(#{topic := Topic,
+                                         partitions := [#{leader := HeadId,
+                                                          isrs := [TailId | _]} | _]}, Acc) ->
+                                       update_chains_and_topics(Brokers, Topic, HeadId, TailId, Acc)
+                                   end, {#{}, #{}}, TopicMetadata),
+
+    {Chains, Topics}.
+
+update_chains_and_topics(Brokers, Topic, HeadId, TailId, {ChainsAcc, TopicsAcc}) ->
+    {_, {HeadHost, HeadPort}} = lists:keyfind(HeadId, 1, Brokers),
+    {_, {TailHost, TailPort}} = lists:keyfind(TailId, 1, Brokers),
+    ChainName = <<HeadHost/binary, "-", (integer_to_binary(HeadPort))/binary>>,
+    {maps:put(ChainName, #chain{name = ChainName,
+                               head = {binary_to_list(HeadHost), HeadPort},
+                               tail = {binary_to_list(TailHost), TailPort}}, ChainsAcc),
+     maps:put(Topic, ChainName, TopicsAcc)}.
+
+
+decode_metadata_response_brokers(<<NodeId:32/signed-integer, HostSize:16/signed-integer,
+                                   Host:HostSize/binary, Port:32/signed-integer, Rest/binary>>) ->
+    {{NodeId, {binary:copy(Host), Port}}, Rest}.
+
+decode_metadata_response_topic_metadata(<<_ErrorCode:16/signed-integer, TopicSize:16/signed-integer,
+                                          Topic:TopicSize/binary, PartitionMetadataRest/binary>>) ->
+    {PartitionMetadata, Rest} = decode_array(fun decode_partition_metadata/1, PartitionMetadataRest),
+    {#{topic => binary:copy(Topic),
+       partitions => PartitionMetadata}, Rest}.
+
+decode_partition_metadata(<<_PartitionErrorCode:16/signed-integer, PartitionId:32/signed-integer,
+                            Leader:32/signed-integer, Rest/binary>>) ->
+    {Isrs, Rest1}= decode_array(fun decode_int32/1, Rest),
+    {Replicas, Rest2}= decode_array(fun decode_int32/1, Rest1),
+
+    {#{partition_id => PartitionId,
+       leader => Leader,
+       isrs => Isrs,
+       replicas => Replicas}, Rest2}.
 
 decode_produce_response(Response) ->
     {TopicResults, _Rest}= decode_array(fun decode_produce_response_topics/1, Response),

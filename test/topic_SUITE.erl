@@ -12,6 +12,7 @@ init_per_suite(Config) ->
     lager:start(),
     application:load(vonnegut),
     application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
+    application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
     {ok, _} = application:ensure_all_started(vonnegut),
     Config.
 

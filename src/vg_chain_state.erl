@@ -1,3 +1,8 @@
+%%%-------------------------------------------------------------------
+%% @doc Track the current state of the chain this node is a member of.
+%%
+%% @end
+%%%-------------------------------------------------------------------
 -module(vg_chain_state).
 
 -behaviour(gen_server).
@@ -53,6 +58,8 @@ handle_info(timeout, State=#state{replicas=Replicas}) ->
     case role(node(), Members) of
         solo ->
             lager:info("at=chain_complete role=solo requested_size=1", []),
+            lager:info("at=start_cluster_mgr role=solo"),
+            vonnegut_sup:start_cluster_mgr(),
             {noreply, State#state{members=Members,
                                   role=solo,
                                   next_node=tail,
@@ -66,7 +73,14 @@ handle_info(timeout, State=#state{replicas=Replicas}) ->
             {ok, CurrentMembers} = vg_peer_service:members(),
             _ = [net_adm:ping(Member) || Member <- CurrentMembers],
             case length(CurrentMembers) of
-                Replicas ->
+                Size when Size >= Replicas ->
+                    case Role of
+                        head ->
+                            lager:info("at=start_cluster_mgr role=head"),
+                            vonnegut_sup:start_cluster_mgr();
+                        _ ->
+                            ok
+                    end,
                     lager:info("at=chain_complete requested_size=~p", [Replicas]),
                     {noreply, State#state{members=Members,
                                           role=Role,
@@ -164,6 +178,6 @@ lookup(none) ->
 lookup({direct, Nodes}) ->
     ordsets:from_list(Nodes);
 lookup({srv, DiscoveryDomain}) ->
-    lists:foldl(fun({_, _, _, H}, NodesAcc) ->
-                    ordsets:add_element(list_to_atom(string:join([?NODENAME, H], "@")), NodesAcc)
+    lists:foldl(fun({_, _, Port, H}, NodesAcc) ->
+                    ordsets:add_element({?NODENAME, H, Port}, NodesAcc)
                 end, ordsets:new(), inet_res:lookup(DiscoveryDomain, in, srv)).

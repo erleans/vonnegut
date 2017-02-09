@@ -14,17 +14,15 @@
 -type record_set() :: [record()].
 
 create_topic(Topic) ->
-    {ok, _} = vonnegut_sup:create_topic(Topic),
+    {ok, _} = vg_cluster_mgr:create_topic(Topic),
     ok.
 
 ensure_topic(Topic) ->
-    case vonnegut_sup:create_topic(Topic) of
+    case vg_cluster_mgr:create_topic(Topic) of
         {ok, _} ->
             ok;
-        {error, {already_started, _}} ->
-            ok;
-        _ ->
-            error
+        {error, exists} ->
+            ok
     end.
 
 -spec write(Topic, Record) -> ok | {error, any()} when

@@ -2,7 +2,9 @@
 
 %%-behavior(shackle_client). ?
 
--export([fetch/1, fetch/2,
+-export([metadata/0,
+         ensure_topic/1,
+         fetch/1, fetch/2,
          produce/2,
          init/0,
          setup/2,
@@ -17,6 +19,14 @@
           corids          = #{}  :: maps:map(),
           buffer          = <<>> :: binary()
          }).
+
+-spec metadata() -> {Chains :: vg_cluster_mgr:chains_map(),
+                     Topics :: vg_cluster_mgr:topics_map()}.
+metadata() ->
+    shackle:call(metadata, {metadata, []}).
+
+ensure_topic(Topic) ->
+    shackle:call(metadata, {metadata, [Topic]}).
 
 fetch(Topic) ->
     fetch(Topic, 0).
@@ -40,6 +50,17 @@ setup(_Socket, State) ->
     {ok, State}.
 
 -spec handle_request(term(), term()) -> {ok, non_neg_integer(), iodata(), term()}.
+handle_request({metadata, Topics}, #state {
+                 request_counter = RequestCounter,
+                 corids = CorIds
+                } = State) ->
+    RequestId = request_id(RequestCounter),
+    Request = vg_protocol:encode_metadata_request(Topics),
+    Data = vg_protocol:encode_request(?METADATA_REQUEST, RequestId, ?CLIENT_ID, Request),
+
+    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
+     State#state{corids = maps:put(RequestId, ?METADATA_REQUEST, CorIds),
+                 request_counter = RequestCounter + 1}};
 handle_request({fetch, Topic, Partition, Position}, #state {
                  request_counter = RequestCounter,
                  corids = CorIds

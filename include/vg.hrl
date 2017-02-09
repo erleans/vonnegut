@@ -25,3 +25,13 @@
 
 -define(SEGMENTS_TABLE, logs_segments_table).
 -define(WATERMARK_TABLE, high_watermarks_table).
+-define(CHAINS_TABLE, chains_table).
+
+-define(topic_map, topic_map).
+
+-record(chain, {
+          name :: binary(),
+          head :: {inet:ip_address() | inet:hostname(), inet:port_number()},
+          tail :: {inet:ip_address() | inet:hostname(), inet:port_number()}
+         }).
+-type chain() :: #chain{}.

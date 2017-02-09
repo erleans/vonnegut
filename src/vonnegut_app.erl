@@ -16,8 +16,7 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-    vg_log_segments:init_table(),
-    vg_topics:init_table(),
+    init_tables(),
     vonnegut_sup:start_link().
 
 %%--------------------------------------------------------------------
@@ -27,3 +26,7 @@ stop(_State) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+init_tables() ->
+    vg_log_segments:init_table(),
+    vg_topics:init_table().
