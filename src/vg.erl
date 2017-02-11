@@ -12,11 +12,18 @@
                     crc => integer(),
                     record := binary() | {binary(), binary()}}.
 -type record_set() :: [record()].
+-type topic() :: binary().
 
+-export_types([topic/0,
+               record/0,
+               record_set/0]).
+
+-spec create_topic(Topic :: topic()) -> ok.
 create_topic(Topic) ->
     {ok, _} = vg_cluster_mgr:create_topic(Topic),
     ok.
 
+-spec ensure_topic(Topic :: topic()) -> ok.
 ensure_topic(Topic) ->
     case vg_cluster_mgr:create_topic(Topic) of
         {ok, _} ->
@@ -26,7 +33,7 @@ ensure_topic(Topic) ->
     end.
 
 -spec write(Topic, Record) -> ok | {error, any()} when
-      Topic :: binary(),
+      Topic :: topic(),
       Record :: binary() | record_set().
 write(Topic, Record) when is_binary(Record) ->
     vg_active_segment:write(Topic, 0, [#{record => Record}]);
@@ -37,7 +44,7 @@ fetch(Topic) ->
     fetch(Topic, 0).
 
 -spec fetch(Topic, Offset) -> RecordSet when
-      Topic :: binary(),
+      Topic :: topic(),
       Offset :: integer(),
       RecordSet :: #{high_water_mark := integer(),
                       partition := 0,

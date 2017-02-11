@@ -12,7 +12,11 @@ spec:
   - port: {{ .Values.service.externalPort }}
     targetPort: {{ .Values.service.internalPort }}
     protocol: TCP
-    name: tcp
+    name: data
+  - port: {{ .Values.service.partisanPort }}
+    targetPort: {{ .Values.service.partisanPort }}
+    protocol: TCP
+    name: partisan
   selector:
     app: {{ template "fullname" . }}
     type: node

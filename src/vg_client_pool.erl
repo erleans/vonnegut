@@ -25,7 +25,7 @@ start() ->
                 [{Host, Port} | _] ->
                     start_pool(metadata, #{ip => Host,
                                            port => Port}),
-                    {Chains, Topics} = vg_client:metadata(),
+                    {ok, {Chains, Topics}} = vg_client:metadata(),
                     maybe_init_ets(),
                     _ = start_pools(Chains),
                     application:set_env(vonnegut, chains, Chains),
@@ -51,7 +51,7 @@ start_pools(Chains) ->
      || {Name, Chain} <- maps:to_list(Chains)].
 
 refresh_topic_map() ->
-    {Chains, Topics} = vg_client:metadata(),
+    {ok, {Chains, Topics}} = vg_client:metadata(),
     _ = start_pools(Chains),
     refresh_topic_map(Topics, Chains).
 
@@ -82,12 +82,12 @@ get_pool(Topic, RW, Try) ->
                     refresh_topic_map(),
                     get_pool(Topic, RW, second);
                 {_, second} ->
-                    lager:debug("not found chain: ~p", [Topic]),
+                    lager:error("failed finding existing chain and creating new topic=~p", [Topic]),
                     {error, not_found}
             end;
         [{_, Chain}] ->
             Pool = make_pool_name(Chain, RW),
-            lager:debug("found chain: ~p ~p", [Topic, Pool]),
+            lager:debug("found chain for topic=~p on pool=~p", [Topic, Pool]),
             {ok, Pool}
     end.
 

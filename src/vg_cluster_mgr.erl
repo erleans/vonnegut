@@ -11,7 +11,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1,
+-export([start_link/3,
          get_map/0,
          create_topic/1]).
 
@@ -21,9 +21,8 @@
 
 -include("vg.hrl").
 
--type topic() :: binary().
 -type chain_id() :: binary().
--type topics_map() :: #{topic() => chain_id()}.
+-type topics_map() :: #{vg:topic() => chain_id()}.
 -type chains_map() :: #{chain_id() => chain()}.
 
 -export_types([topic/0,
@@ -37,8 +36,11 @@
                 chains = #{} :: maps:map(),
                 epoch        :: integer()}).
 
-start_link(DataDir) ->
-    gen_server:start_link({global, ?SERVER}, ?MODULE, [DataDir], []).
+-spec start_link(vg_chain_state:chain_name(), [vg_chain_state:chain_node()], file:filename_all()) -> {ok, pid()}.
+start_link(ChainName, ChainNodes, DataDir) ->
+    gen_server:start_link({global, ?SERVER}, ?MODULE, [ChainName, ChainNodes, DataDir], []).
+
+%% add chain functionality needed
 
 -spec get_map() -> {Topics :: topics_map(), Chains :: chains_map(), Epoch :: integer()}.
 get_map() ->
@@ -48,8 +50,9 @@ get_map() ->
 create_topic(Topic) ->
     gen_server:call({global, ?SERVER}, {create_topic, Topic}).
 
-init([DataDir]) ->
-    State = load_state(DataDir),
+init([ChainName, ChainNodes, DataDir]) ->
+    Chain = create_chain(ChainName, ChainNodes),
+    State = load_state([Chain], DataDir),
     {ok, State}.
 
 handle_call(get_map, _From, State=#state{topics=Topics,
@@ -93,9 +96,16 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-load_state(_DataDir) ->
-    Cluster = application:get_env(vonnegut, cluster, local),
-    Chains = raw_to_chains(Cluster),
+create_chain(Name, []) ->
+    #chain{name = Name,
+           head = {"127.0.0.1", 5555},
+           tail = {"127.0.0.1", 5555}};
+create_chain(Name, Nodes) ->
+    #chain{name = Name,
+           head = head(Nodes),
+           tail = tail(Nodes)}.
+
+load_state(Chains, _DataDir) ->
     ChainsMap = lists:foldl(fun(Chain=#chain{name=Name}, Acc) ->
                                 maps:put(Name, Chain, Acc)
                             end, #{}, Chains),
@@ -103,28 +113,8 @@ load_state(_DataDir) ->
            chains = ChainsMap,
            epoch = 0}.
 
-raw_to_chains({direct, Nodes}) ->
-    ParsedNodes = [parse_name(Node) || Node <- Nodes],
-    Chains = ordsets:from_list([Chain || {Chain, _, _, _} <- ParsedNodes]),
-    [make_chain(Chain, ParsedNodes)
-     || Chain <- Chains];
-raw_to_chains(local) ->
-    [#chain{name = <<"local">>,
-            head = {"127.0.0.1", 5555},
-            tail = {"127.0.0.1", 5555}}].
+head([{_, Host, _, ClientPort} | _]) ->
+    {Host, ClientPort}.
 
-parse_name({Name0, Host, Port}) ->
-    %% this especially is likely to cause problems if we allow
-    %% arbitrary chain naming
-    Name = atom_to_list(Name0),
-    [Chain, Pos] = string:tokens(Name, "-"),
-    {Chain, list_to_integer(Pos), Host, Port}.
-
-make_chain(Chain, Nodes0) ->
-    Nodes = [Node || Node = {C, _, _, _} <- Nodes0, C =:= Chain],
-    Len = length(Nodes),
-    {value, {_, _, Head, HeadPort}} = lists:keysearch(0, 2, Nodes),
-    {value, {_, _, Tail, TailPort}} = lists:keysearch(Len - 1, 2, Nodes),
-    #chain{name = list_to_binary(Chain),
-           head = {Head, HeadPort},
-           tail = {Tail, TailPort}}.
+tail(Nodes) ->
+    head(lists:reverse(Nodes)).

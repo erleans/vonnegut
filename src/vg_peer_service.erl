@@ -9,10 +9,7 @@
          stop/1]).
 
 join(Node) ->
-    {Name, Host, Port} = Node,
-    %% this assumption of correlation is bad and we should fix; need a
-    %% better to do sys.config variations...
-    partisan_peer_service:join({Name, Host, Port + 10000}, true).
+    partisan_peer_service:join(Node, true).
 
 leave() ->
     partisan_peer_service:leave([]).

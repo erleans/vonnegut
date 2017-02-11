@@ -12,10 +12,10 @@
     acceptor_pool,
     shackle,
     erlware_commons,
+    granderl,
     partisan
    ]},
   {env,[{log_dirs, ["./data"]},
-        {port, "5555"},
         {acceptor_pool_size, 10},
         {client_pool_size, 2},
 

@@ -230,8 +230,8 @@ update_chains_and_topics(Brokers, Topic, HeadId, TailId, {ChainsAcc, TopicsAcc})
     {_, {TailHost, TailPort}} = lists:keyfind(TailId, 1, Brokers),
     ChainName = <<HeadHost/binary, "-", (integer_to_binary(HeadPort))/binary>>,
     {maps:put(ChainName, #chain{name = ChainName,
-                               head = {binary_to_list(HeadHost), HeadPort},
-                               tail = {binary_to_list(TailHost), TailPort}}, ChainsAcc),
+                                head = {binary_to_list(HeadHost), HeadPort},
+                                tail = {binary_to_list(TailHost), TailPort}}, ChainsAcc),
      maps:put(Topic, ChainName, TopicsAcc)}.
 
 

@@ -20,14 +20,17 @@
           buffer          = <<>> :: binary()
          }).
 
--spec metadata() -> {Chains :: vg_cluster_mgr:chains_map(),
-                     Topics :: vg_cluster_mgr:topics_map()}.
+-spec metadata() -> {ok, {Chains :: vg_cluster_mgr:chains_map(),
+                          Topics :: vg_cluster_mgr:topics_map()}}.
 metadata() ->
     shackle:call(metadata, {metadata, []}).
 
+-spec ensure_topic(Topic :: vg:topic()) -> {ok, {Chains :: vg_cluster_mgr:chains_map(),
+                                                 Topics :: vg_cluster_mgr:topics_map()}}.
 ensure_topic(Topic) ->
     shackle:call(metadata, {metadata, [Topic]}).
 
+-spec fetch(Topic :: vg:topic()) -> {ok, maps:map()}.
 fetch(Topic) ->
     fetch(Topic, 0).
 
@@ -36,6 +39,8 @@ fetch(Topic, Position) ->
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
     shackle:call(Pool, {fetch, Topic, 0, Position}).
 
+-spec produce(Topic :: vg:topic(), RecordSet :: vg:record_set())
+             -> {ok, #{topic := vg:topic(), offset := integer()}}.
 produce(Topic, RecordSet) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, write),
     lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
@@ -110,7 +115,7 @@ handle_data(Data, State=#state{buffer=Buffer,
         {CorrelationId, Response, Rest} ->
             Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
             lager:debug("cli result ~p ~p", [Response, Result]),
-            {ok, [{CorrelationId, Result}], State#state{corids = maps:remove(CorrelationId, CorIds),
+            {ok, [{CorrelationId, {ok, Result}}], State#state{corids = maps:remove(CorrelationId, CorIds),
                                                         buffer = Rest}}
     end.
 

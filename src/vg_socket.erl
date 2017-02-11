@@ -23,7 +23,7 @@ start_link() ->
 %% gen_server api
 
 init([]) ->
-    Port = vg_utils:to_integer(application:get_env(vonnegut, port, 5555)),
+    Port = vg_config:port(),
     AcceptorPoolSize = application:get_env(vonnegut, acceptor_pool_size, 10),
     % Trapping exit so can close socket in terminate/2
     _ = process_flag(trap_exit, true),

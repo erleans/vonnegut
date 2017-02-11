@@ -114,7 +114,7 @@ wait_for_mgr(N) ->
 
 end_per_testcase(_TestCase, Config) ->
     application:unload(vonnegut),
-    ok = vg_client_pool:stop(),
+    vg_client_pool:stop(),
     application:stop(shackle),
     Config.
 
@@ -144,9 +144,9 @@ all() ->
 bootstrap(Config) ->
     %% just create topics when written to for now
     %% do(vg, create_topic, [<<"foo">>]),
-    R = vg_client:produce(<<"foo">>, <<"bar">>),
+    {ok, R} = vg_client:produce(<<"foo">>, <<"bar">>),
     timer:sleep(800),
-    R1 = vg_client:fetch(<<"foo">>),
+    {ok, R1} = vg_client:fetch(<<"foo">>),
     ct:pal("r ~p ~p", [R, R1]),
     timer:sleep(1800),
     ?assertMatch(#{partitions := [#{record_set := [#{record := <<"bar">>}]}]}, R1),
@@ -164,12 +164,12 @@ roles(Config) ->
     {ok, WritePool} = vg_client_pool:get_pool(Topic, write),
     {ok, ReadPool} = vg_client_pool:get_pool(Topic, read),
 
-    R = shackle:call(WritePool, {fetch, Topic, 0, 12}),
+    {ok, R} = shackle:call(WritePool, {fetch, Topic, 0, 12}),
     timer:sleep(1000),
     ?assertMatch(#{partitions := [#{error_code := 129}]}, R),
 
     %% try to do a write on the tail
-    R1 =  shackle:call(ReadPool, {produce, Topic, 0, [<<"bar3000">>, <<"barn_owl">>]}),
+    {ok, R1} =  shackle:call(ReadPool, {produce, Topic, 0, [<<"bar3000">>, <<"barn_owl">>]}),
     ?assertMatch(#{error_code := 131}, R1),
     vg_client_pool:start_pool(middle_end, #{ip => "127.0.0.1", port => 5556}),
 

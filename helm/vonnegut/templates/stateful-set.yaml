@@ -25,6 +25,11 @@ spec:
 
         ports:
         - containerPort: {{ .Values.service.internalPort }}
+          name: data
+          protocol: TCP
+        - containerPort: {{ .Values.service.partisanPort }}
+          name: partisan
+          protocol: TCP
         volumeMounts:
         - name: data
           mountPath: /opt/vonnegut/data

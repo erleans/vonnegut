@@ -16,6 +16,7 @@ init_per_testcase(_, Config) ->
     application:set_env(vonnegut, segment_bytes, 86),
     application:set_env(vonnegut, index_max_bytes, 18),
     application:set_env(vonnegut, index_interval_bytes, 24),
+    application:set_env(vonnegut, chain, [{discovery, local}]),
     application:ensure_all_started(vonnegut),
     crypto:start(),
     Config.
