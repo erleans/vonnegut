@@ -13,7 +13,7 @@
 
 -spec chain_name() -> vg_chain_state:chain_name().
 chain_name() ->
-    from_chain(name, solo).
+    vg_utils:to_atom(from_chain(name, solo)).
 
 -spec port() -> integer().
 port() ->

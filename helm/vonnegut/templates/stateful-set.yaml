@@ -44,6 +44,8 @@ spec:
             configMapKeyRef:
               name: "{{ .Release.Name }}-vonnegut-config"
               key: vonnegut.replicas
+        - name: CHAIN_NAME
+          value: {{ .Values.chain.name }}
 
   volumeClaimTemplates:
   - metadata:
