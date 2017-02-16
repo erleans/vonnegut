@@ -4,6 +4,8 @@ set -xe
 
 if [[ $1 ]]; then
     REPO=$1
+else
+    REPO=us.gcr.io/nucleus-sti
 fi
 
 rebar3 as prod tar

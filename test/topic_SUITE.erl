@@ -12,6 +12,8 @@ init_per_suite(Config) ->
     lager:start(),
     application:load(vonnegut),
     application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
+    application:set_env(vonnegut, chain, [{discovery, local}]),
+    application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
     {ok, _} = application:ensure_all_started(vonnegut),
     Config.
 
@@ -41,16 +43,16 @@ write(Config) ->
     Topic = ?config(topic, Config),
     Anarchist = <<"no gods no masters">>,
     [begin
-         R = vg_client:produce(Topic, Anarchist),
+         {ok, R} = vg_client:produce(Topic, Anarchist),
          ct:pal("reply: ~p", [R])
      end
      || _ <- lists:seq(1, rand:uniform(20))],
     Communist =  <<"from each according to their abilities, to "
                    "each according to their needs">>,
-    #{topic := Topic, offset := R1} = vg_client:produce(Topic, Communist),
+    {ok, #{topic := Topic, offset := R1}} = vg_client:produce(Topic, Communist),
     ct:pal("reply: ~p", [R1]),
-    #{partitions := [#{record_set := Reply}]} = vg_client:fetch(Topic, R1),
+    {ok, #{partitions := [#{record_set := Reply}]}} = vg_client:fetch(Topic, R1),
     ?assertMatch([#{record := Communist}], Reply),
 
-    #{partitions := [#{record_set := Reply1}]} = vg_client:fetch(Topic, R1 - 1),
+    {ok, #{partitions := [#{record_set := Reply1}]}} = vg_client:fetch(Topic, R1 - 1),
     ?assertMatch([#{record := Anarchist}, #{record := Communist}], Reply1).

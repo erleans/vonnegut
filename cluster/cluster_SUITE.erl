@@ -74,7 +74,6 @@ connect(Node, _Wait, 0) ->
     exit(disterl);
 connect(Node, Wait, Tries) ->
     try
-        true = net_kernel:hidden_connect_node(Node),
         pong = net_adm:ping(Node)
     catch _:_ ->
             lager:debug("connect failed: ~p ~p", [Node, Tries]),
@@ -87,15 +86,35 @@ end_per_group(_GroupName, Config) ->
 
 init_per_testcase(_TestCase, Config) ->
     application:load(vonnegut),
-    %% ct:pal("envs: ~p", [application:get_all_env(vonnegut)]),
     application:start(shackle),
-    ok = vg_client_pool:start(),
-    timer:sleep(3000),
-    Config.
+    %% wait for the cluster manager to be up before starting the pools
+    case wait_for_mgr() of
+        ok ->
+            application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
+            ok = vg_client_pool:start(),
+            timer:sleep(3000),
+            Config;
+        _ ->
+            {fail, vg_cluster_mgr_timeout}
+    end.
+
+wait_for_mgr() ->
+    wait_for_mgr(0).
+
+wait_for_mgr(N) when N =:= 5 ->
+    timeout;
+wait_for_mgr(N) ->
+    case global:whereis_name(vg_cluster_mgr) of
+        undefined ->
+            timer:sleep(500),
+            wait_for_mgr(N+1);
+        _ ->
+            ok
+    end.
 
 end_per_testcase(_TestCase, Config) ->
     application:unload(vonnegut),
-    ok = vg_client_pool:stop(),
+    vg_client_pool:stop(),
     application:stop(shackle),
     Config.
 
@@ -125,35 +144,38 @@ all() ->
 bootstrap(Config) ->
     %% just create topics when written to for now
     %% do(vg, create_topic, [<<"foo">>]),
-    R = vg_client:produce(<<"foo">>, <<"bar">>),
+    {ok, R} = vg_client:produce(<<"foo">>, <<"bar">>),
     timer:sleep(800),
-    R1 = vg_client:fetch(<<"foo">>),
+    {ok, R1} = vg_client:fetch(<<"foo">>),
     ct:pal("r ~p ~p", [R, R1]),
     timer:sleep(1800),
     ?assertMatch(#{partitions := [#{record_set := [#{record := <<"bar">>}]}]}, R1),
     Config.
 
 roles(Config) ->
+    Topic = <<"foo">>,
     %% write some stuff to have something to read.
-    [vg_client:produce(<<"foo">>, <<"bar", (integer_to_binary(N))/binary>>)
+    [vg_client:produce(Topic, <<"bar", (integer_to_binary(N))/binary>>)
      || N <- lists:seq(1, 20)],
     timer:sleep(800),
-     vg_client:fetch(<<"foo">>),
+    vg_client:fetch(Topic),
 
     %% try to do a read on the head
-    R = shackle:call(chain1_head, {fetch, <<"foo">>, 0, 12}),
-    ct:pal("R ~p", [R]),
+    {ok, WritePool} = vg_client_pool:get_pool(Topic, write),
+    {ok, ReadPool} = vg_client_pool:get_pool(Topic, read),
+
+    {ok, R} = shackle:call(WritePool, {fetch, Topic, 0, 12}),
     timer:sleep(1000),
     ?assertMatch(#{partitions := [#{error_code := 129}]}, R),
 
     %% try to do a write on the tail
-    R1 =  shackle:call(chain1_tail, {produce, <<"foo">>, 0, [<<"bar3000">>, <<"barn_owl">>]}),
+    {ok, R1} =  shackle:call(ReadPool, {produce, Topic, 0, [<<"bar3000">>, <<"barn_owl">>]}),
     ?assertMatch(#{error_code := 131}, R1),
     vg_client_pool:start_pool(middle_end, #{ip => "127.0.0.1", port => 5556}),
 
     %% try to connect the middle of the chain
     ?assertMatch({error, socket_closed},
-                 shackle:call(middle_end, {fetch, <<"foo">>, 0, 12})),
+                 shackle:call(middle_end, {fetch, Topic, 0, 12})),
 
     shackle_pool:stop(middle_end),
     Config.

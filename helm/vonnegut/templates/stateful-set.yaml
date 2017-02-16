@@ -25,6 +25,11 @@ spec:
 
         ports:
         - containerPort: {{ .Values.service.internalPort }}
+          name: data
+          protocol: TCP
+        - containerPort: {{ .Values.service.partisanPort }}
+          name: partisan
+          protocol: TCP
         volumeMounts:
         - name: data
           mountPath: /opt/vonnegut/data
@@ -39,6 +44,8 @@ spec:
             configMapKeyRef:
               name: "{{ .Release.Name }}-vonnegut-config"
               key: vonnegut.replicas
+        - name: CHAIN_NAME
+          value: {{ .Values.chain.name }}
 
   volumeClaimTemplates:
   - metadata:

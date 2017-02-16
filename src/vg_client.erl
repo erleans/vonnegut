@@ -2,7 +2,9 @@
 
 %%-behavior(shackle_client). ?
 
--export([fetch/1, fetch/2,
+-export([metadata/0,
+         ensure_topic/1,
+         fetch/1, fetch/2,
          produce/2,
          init/0,
          setup/2,
@@ -18,6 +20,17 @@
           buffer          = <<>> :: binary()
          }).
 
+-spec metadata() -> {ok, {Chains :: vg_cluster_mgr:chains_map(),
+                          Topics :: vg_cluster_mgr:topics_map()}}.
+metadata() ->
+    shackle:call(metadata, {metadata, []}).
+
+-spec ensure_topic(Topic :: vg:topic()) -> {ok, {Chains :: vg_cluster_mgr:chains_map(),
+                                                 Topics :: vg_cluster_mgr:topics_map()}}.
+ensure_topic(Topic) ->
+    shackle:call(metadata, {metadata, [Topic]}).
+
+-spec fetch(Topic :: vg:topic()) -> {ok, maps:map()}.
 fetch(Topic) ->
     fetch(Topic, 0).
 
@@ -26,6 +39,8 @@ fetch(Topic, Position) ->
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
     shackle:call(Pool, {fetch, Topic, 0, Position}).
 
+-spec produce(Topic :: vg:topic(), RecordSet :: vg:record_set())
+             -> {ok, #{topic := vg:topic(), offset := integer()}}.
 produce(Topic, RecordSet) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, write),
     lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
@@ -40,6 +55,17 @@ setup(_Socket, State) ->
     {ok, State}.
 
 -spec handle_request(term(), term()) -> {ok, non_neg_integer(), iodata(), term()}.
+handle_request({metadata, Topics}, #state {
+                 request_counter = RequestCounter,
+                 corids = CorIds
+                } = State) ->
+    RequestId = request_id(RequestCounter),
+    Request = vg_protocol:encode_metadata_request(Topics),
+    Data = vg_protocol:encode_request(?METADATA_REQUEST, RequestId, ?CLIENT_ID, Request),
+
+    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
+     State#state{corids = maps:put(RequestId, ?METADATA_REQUEST, CorIds),
+                 request_counter = RequestCounter + 1}};
 handle_request({fetch, Topic, Partition, Position}, #state {
                  request_counter = RequestCounter,
                  corids = CorIds
@@ -89,7 +115,7 @@ handle_data(Data, State=#state{buffer=Buffer,
         {CorrelationId, Response, Rest} ->
             Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
             lager:debug("cli result ~p ~p", [Response, Result]),
-            {ok, [{CorrelationId, Result}], State#state{corids = maps:remove(CorrelationId, CorIds),
+            {ok, [{CorrelationId, {ok, Result}}], State#state{corids = maps:remove(CorrelationId, CorIds),
                                                         buffer = Rest}}
     end.
 

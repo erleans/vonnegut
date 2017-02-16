@@ -8,6 +8,7 @@
          open_append/1,
          open_read/1,
 
+         to_atom/1,
          to_integer/1]).
 
 %% Convenience functions for creating index and log file names
@@ -44,5 +45,11 @@ open_read(Filename) ->
     file:open(Filename, [read, raw, binary]).
 
 to_integer(I) when is_integer(I) -> I;
-to_integer(I) when is_list(I) -> list_to_integer(I);
-to_integer(I) when is_binary(I) -> binary_to_integer(I).
+to_integer(I) when is_list(I)    -> list_to_integer(I);
+to_integer(I) when is_binary(I)  -> binary_to_integer(I);
+to_integer(_)                    -> throw(badarg).
+
+to_atom(A) when is_list(A)   -> list_to_atom(A);
+to_atom(A) when is_binary(A) -> binary_to_atom(A, utf8);
+to_atom(A) when is_atom(A)   -> A;
+to_atom(_)                   -> throw(badarg).

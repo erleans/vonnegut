@@ -1,105 +1,146 @@
+%%%-------------------------------------------------------------------
+%% @doc Track the current state of the chain this node is a member of.
+%%
+%% @end
+%%%-------------------------------------------------------------------
 -module(vg_chain_state).
 
--behaviour(gen_server).
+-behaviour(gen_statem).
 
 -export([start_link/0,
          role/0,
          next/0]).
 
 -export([init/1,
-         handle_call/3,
-         handle_cast/2,
-         handle_info/2,
-         terminate/2,
-         code_change/3]).
+         active/3,
+         inactive/3,
+         callback_mode/0,
+         terminate/3,
+         code_change/4]).
 
--record(state, {
-          role      :: head | tail | middle | solo | undefined,
-          members   :: ordsets:ordset(),
-          next_node :: atom() | tail,
-          replicas  :: integer(),
-          active    :: boolean()
+-type chain_name() :: atom().
+-type role() :: head | tail | middle | solo | undefined.
+-type chain_node() :: {atom(), inet:ip_address() | inet:hostname(), inet:port_number(), inet:port_number()}.
+
+-export_types([role/0,
+               chain_node/0]).
+
+-record(data, {
+          name         :: chain_name(),
+          role         :: role(),
+          cluster_type :: vg_utils:cluster_type(),
+          members      :: ordsets:ordset(),
+          all_nodes    :: [chain_node()] | undefined,
+          next_node    :: atom() | tail,
+          replicas     :: integer()
          }).
 
 -define(SERVER, ?MODULE).
--define(NODENAME, "vonnegut").
+-define(NODENAME, vonnegut).
 
 start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+    gen_statem:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 next() ->
-    gen_server:call(?SERVER, next).
+    gen_statem:call(?SERVER, next_node).
 
 role() ->
-    gen_server:call(?SERVER, role).
+    gen_statem:call(?SERVER, role).
 
 init([]) ->
-    Replicas = list_to_integer(application:get_env(vonnegut, replicas, "1")),
-    {ok, #state{replicas=Replicas,
-                active=false}, 0}.
+    ChainName = vg_config:chain_name(),
+    ClusterType = vg_config:cluster_type(),
+    Replicas = vg_config:replicas(),
+    {ok, inactive, #data{name=ChainName,
+                         replicas=Replicas,
+                         cluster_type=ClusterType}, [{state_timeout, 0, connect}]}.
 
-handle_call(next, _From, State = #state{next_node = Next}) ->
-    {reply, Next, State};
-handle_call(role, _From, State = #state{role = Role}) ->
-    {reply, Role, State};
-handle_call(_, _From, State) ->
-    {noreply, State}.
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info(timeout, State=#state{replicas=Replicas}) ->
-    Members = join(),
-    case role(node(), Members) of
+inactive({call, From}, next_node, _Data) ->
+    {keep_state_and_data, [{reply, From, undefined}]};
+inactive({call, From}, role, _Data) ->
+    {keep_state_and_data, [{reply, From, undefined}]};
+inactive(state_timeout, connect, Data=#data{name=Name,
+                                            replicas=Replicas,
+                                            cluster_type=ClusterType}) ->
+    {Members, AllNodes} = join(ClusterType),
+    lager:info("cluster_type=~p members=~p all_nodes=~p", [ClusterType, Members, AllNodes]),
+    case role(node(), Members, ClusterType) of
         solo ->
             lager:info("at=chain_complete role=solo requested_size=1", []),
-            {noreply, State#state{members=Members,
-                                  role=solo,
-                                  next_node=tail,
-                                  active=true}};
+            lager:info("at=start_cluster_mgr role=solo"),
+            vonnegut_sup:start_cluster_mgr(solo, []),
+            {next_state, active, Data#data{members=Members,
+                                           role=solo,
+                                           all_nodes=[],
+                                           next_node=tail}};
+        undefined ->
+            {keep_state, Data#data{members=Members,
+                                   role=undefined}, [{state_timeout, 1000, connect}]};
         Role ->
-            NextNode = next_node(Role, node(), Members),
-            Self = self(),
-            vg_peer_service:on_down(NextNode, fun() -> Self ! {next_node_down, NextNode} end),
-            lager:info("at=chain_join role=~s next_node=~p members=~p", [Role, NextNode, Members]),
+            lager:info("at=chain_join role=~s members=~p", [Role, Members]),
+            case length(Members) of
+                Size when Size >= Replicas ->
+                    case Role of
+                        head ->
+                            lager:info("at=start_cluster_mgr role=head"),
+                            %% if cluster mgr isn't running, start it
+                            %% otherwise, add this chain to the cluster mgr
+                            vonnegut_sup:start_cluster_mgr(Name, AllNodes);
+                        _ ->
+                            ok
+                    end,
 
-            {ok, CurrentMembers} = vg_peer_service:members(),
-            _ = [net_adm:ping(Member) || Member <- CurrentMembers],
-            case length(CurrentMembers) of
-                Replicas ->
+                    %% monitor next link in the chain
+                    NextNode = next_node(Role, node(), Members),
+                    Self = self(),
+                    vg_peer_service:on_down(NextNode, fun() -> Self ! {next_node_down, NextNode} end),
+
                     lager:info("at=chain_complete requested_size=~p", [Replicas]),
-                    {noreply, State#state{members=Members,
-                                          role=Role,
-                                          next_node=NextNode,
-                                          active=true}};
+                    {next_state, active, Data#data{members=Members,
+                                                   all_nodes=AllNodes,
+                                                   role=Role,
+                                                   next_node=NextNode}};
                 Size ->
                     lager:info("at=chain_incomplete requested_size=~p current_size=~p", [Replicas, Size]),
-                    {noreply, State#state{members=Members,
-                                          role=Role,
-                                          next_node=NextNode,
-                                          active=false}, 200}
+                    {keep_state, Data#data{members=Members,
+                                           role=Role}, [{state_timeout, 1000, connect}]}
             end
     end;
-handle_info({next_node_down, NextNode}, State) ->
-    %% is this the right place to do this?
-    lager:info("next_node_down=~p", [NextNode]),
-    {noreply, State#state{active = false}}.
+inactive(info, {next_node_down, NextNode}, _Data) ->
+    lager:info("state=inactive next_node_down=~p", [NextNode]),
+    {keep_state_and_data, [{state_timeout, 0, connect}]}.
 
-terminate(_Reason, _State) ->
+active({call, From}, next_node, #data{next_node=NextNode}) ->
+    {keep_state_and_data, [{reply, From, NextNode}]};
+active({call, From}, role, #data{role=Role}) ->
+    {keep_state_and_data, [{reply, From, Role}]};
+active(info, {next_node_down, NextNode}, Data) ->
+    lager:info("state=active next_node_down=~p", [NextNode]),
+    {next_state, inactive, Data, 0}.
+
+callback_mode() ->
+    state_functions.
+
+terminate(_Reason, _State, _Data) ->
     ok.
 
-code_change(_, State, _) ->
-    {ok, State}.
+code_change(_, _OldState, Data, _) ->
+    {ok, Data}.
 
 %% Internal functions
 
-role(_Node, []) ->
+%% assume we expect to find at least 1 node if using srv discovery
+role(_Node, [], {srv, _}) ->
+    undefined;
+role(Node, [Node], {srv, _}) ->
+    undefined;
+role(_Node, [], local) ->
     solo;
-role(Node, [Node]) ->
+role(Node, [Node], local) ->
     solo;
-role(Node, [Node | _]) ->
+role(Node, [Node | _], _) ->
     head;
-role(Node, Nodes) ->
+role(Node, Nodes, _) ->
     case lists:reverse(Nodes) of
         [Node | _] ->
             tail;
@@ -132,25 +173,13 @@ find_next(Node, Nodes) ->
             N
     end.
 
-
-join() ->
-    ClusterType = case application:get_env(vonnegut, cluster, local) of
-                      "local" ->
-                          local;
-                      local ->
-                          local;
-                      {direct, Nodes} ->
-                          {direct, Nodes};
-                      {srv, Domain} ->
-                          {srv, Domain};
-                      Other ->
-                          lager:error("Unknown clustering option: ~p", [Other]),
-                          none
-                  end,
-
-    NewNodes = lookup(ClusterType),
-    ordsets:fold(fun(Node, _) -> vg_peer_service:join(Node) end, ok, NewNodes),
-    [list_to_atom(atom_to_list(Name)++"@"++Host) || {Name, Host, _Port} <- NewNodes].
+join(ClusterType) ->
+    AllNodes = lookup(ClusterType),
+    ordsets:fold(fun({Name, Host, PartisanPort, _ClientPort}, _) ->
+                     vg_peer_service:join({Name, Host, PartisanPort})
+                 end, ok, AllNodes),
+    {ok, Members} = vg_peer_service:members(),
+    {lists:usort(Members), AllNodes}.
 
 %% leave() ->
 %%     vg_peer_service:leave([]).
@@ -164,6 +193,10 @@ lookup(none) ->
 lookup({direct, Nodes}) ->
     ordsets:from_list(Nodes);
 lookup({srv, DiscoveryDomain}) ->
-    lists:foldl(fun({_, _, _, H}, NodesAcc) ->
-                    ordsets:add_element(list_to_atom(string:join([?NODENAME, H], "@")), NodesAcc)
+    lists:foldl(fun({_, _, PartisanPort, H}, NodesAcc) ->
+                    Node = list_to_atom(atom_to_list(?NODENAME)++"@"++H),
+                    %% we could also do this by querying
+                    %% the srv records of _data._tcp.vonnegut.default.svc.cluster.local
+                    ClientPort = rpc:call(Node, vg_config, port, []),
+                    ordsets:add_element({Node, H, PartisanPort, ClientPort}, NodesAcc)
                 end, ordsets:new(), inet_res:lookup(DiscoveryDomain, in, srv)).

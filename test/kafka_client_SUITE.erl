@@ -16,11 +16,12 @@ init_per_suite(Config) ->
     application:set_env(vonnegut, segment_bytes, 86),
     application:set_env(vonnegut, index_max_bytes, 18),
     application:set_env(vonnegut, index_interval_bytes, 24),
+    application:set_env(vonnegut, chain, [{discovery, local}]),
     crypto:start(),
 
     Port = 5555,
-    Host = <<"localhost">>,
-    Hosts = [{"localhost", Port}],
+    Host = <<"127.0.0.1">>,
+    Hosts = [{"127.0.0.1", Port}],
 
     application:ensure_all_started(vonnegut),
     application:ensure_all_started(brod),
@@ -39,13 +40,16 @@ get_metadata(Config) ->
     Hosts = ?config(hosts, Config),
 
     Topic = vg_test_utils:create_random_name(<<"kafka_get_metadata">>),
-    Partition = 0,
     ok = vg:create_topic(Topic),
 
-    {ok, {kpro_MetadataResponse,
-          [{kpro_Broker,0,Host,Port}],
-          [{kpro_TopicMetadata,no_error,Topic,
-            [{kpro_PartitionMetadata,no_error,Partition,0,[],[]}]}| _]}} = brod:get_metadata(Hosts).
+    %% same host will be in broker list twice because we send the same broker as the tail
+    ?assertMatch({ok,{kpro_MetadataResponse,
+                      [{kpro_Broker,0,Host,Port},
+                       {kpro_Broker,0,Host,Port}],
+                      [{kpro_TopicMetadata,no_error,
+                        Topic,
+                        [{kpro_PartitionMetadata,no_error,0,0,[0],[]}]} | _]}}, brod:get_metadata(Hosts)).
+
 
 produce(Config) ->
     Hosts = ?config(hosts, Config),

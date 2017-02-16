@@ -3,13 +3,14 @@
 # Declare variables to be passed into your templates.
 replicaCount: 2
 image:
-  repository: vonnegut
+  repository: us.gcr.io/nucleus-sti/vonnegut
   tag: 0.0.1
   pullPolicy: IfNotPresent
 service:
   name: vonnegut
   externalPort: 5555
   internalPort: 5555
+  partisanPort: 10200
 chain:
   name: chain1
 resources:
