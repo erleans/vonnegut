@@ -2,6 +2,7 @@
 
 -export([init_table/0,
 
+         all/0,
          get_chain/1,
 
          insert_hwm/3,
@@ -15,7 +16,13 @@
 init_table() ->
     ets:new(?WATERMARK_TABLE, [set, public, named_table, {write_concurrency, true}]).
 
+all() ->
+    %% replace with ets table keys
+    {Topics, _Chains, _Epoch} = vg_cluster_mgr:get_map(),
+    maps:keys(Topics).
+
 get_chain(Topic) ->
+    %% replace with ets table lookup
     {Topics, Chains, _Epoch} = vg_cluster_mgr:get_map(),
     case maps:get(Topic, Topics, not_found) of
         not_found ->

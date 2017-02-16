@@ -85,6 +85,7 @@ inactive(state_timeout, connect, Data=#data{name=Name,
                             lager:info("at=start_cluster_mgr role=head"),
                             %% if cluster mgr isn't running, start it
                             %% otherwise, add this chain to the cluster mgr
+                            %% and all our topics
                             vonnegut_sup:start_cluster_mgr(Name, AllNodes);
                         _ ->
                             ok

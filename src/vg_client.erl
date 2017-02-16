@@ -28,7 +28,9 @@ metadata() ->
 -spec ensure_topic(Topic :: vg:topic()) -> {ok, {Chains :: vg_cluster_mgr:chains_map(),
                                                  Topics :: vg_cluster_mgr:topics_map()}}.
 ensure_topic(Topic) ->
-    shackle:call(metadata, {metadata, [Topic]}).
+    Result = shackle:call(metadata, {metadata, [Topic]}, 5000),
+    vg_client_pool:refresh_topic_map(),
+    Result.
 
 -spec fetch(Topic :: vg:topic()) -> {ok, maps:map()}.
 fetch(Topic) ->
@@ -37,14 +39,14 @@ fetch(Topic) ->
 fetch(Topic, Position) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    shackle:call(Pool, {fetch, Topic, 0, Position}).
+    shackle:call(Pool, {fetch, Topic, 0, Position}, 5000).
 
 -spec produce(Topic :: vg:topic(), RecordSet :: vg:record_set())
              -> {ok, #{topic := vg:topic(), offset := integer()}}.
 produce(Topic, RecordSet) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, write),
     lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
-    shackle:call(Pool, {produce, Topic, 0, RecordSet}).
+    shackle:call(Pool, {produce, Topic, 0, RecordSet}, 5000).
 
 -spec init() -> {ok, term()}.
 init() ->

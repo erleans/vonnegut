@@ -117,9 +117,10 @@ handle_request(<<ApiKey:16/signed-integer, _ApiVersion:16/signed-integer, Correl
 handle_request(?METADATA_REQUEST, _, Data, CorrelationId, Socket) ->
     Topics0 = vg_protocol:decode_metadata_request(Data),
     Topics = case Topics0 of
-                 [] -> get_all_topics();
+                 [] -> vg_topics:all();
                  _ -> [vg:ensure_topic(T) || T <- Topics0], Topics0
              end,
+    lager:info("at=metadata_request topics=~p", [Topics]),
     %% need to return all nodes and start giving nodes an integer id
     {_, Chains, _} = vg_cluster_mgr:get_map(),
     {_, Nodes} = maps:fold(fun(_Name, #chain{head={HeadHost, HeadPort},
@@ -151,6 +152,9 @@ handle_request(?FETCH_REQUEST, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTim
     {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
     {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
 
+    lager:info("at=fetch_request topic=~s partition=~p offset=~p segment_id=~p position=~p",
+              [Topic, Partition, Offset, SegmentId, Position]),
+
     File = vg_utils:log_file(Topic, Partition, SegmentId),
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
@@ -169,13 +173,16 @@ handle_request(?FETCH_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signe
                                      _MinBytes:32/signed, Rest/binary>>,
                CorrelationId, Socket) ->
     {[{Topic, [{Partition, _Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
+    lager:info("at=fetch_request error=request_disallowed topic=~s partition=~p", [Topic, Partition]),
     Response = vg_protocol:encode_fetch_response(Topic, Partition, ?FETCH_DISALLOWED_ERROR, 0, 0),
     Size = erlang:iolist_size(Response) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]),
     {error, request_disallowed};
 handle_request(?PRODUCE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
+    lager:info("at=produce_request", []),
     Results = [{Topic, [begin
+                            lager:info("at=produce_request_write topic=~s partition=~p", [Topic, Partition]),
                             {ok, Offset} = vg_active_segment:write(Topic, Partition, MessageSet),
                             {Partition, ?NONE_ERROR, Offset}
                         end || {Partition, MessageSet} <- PartitionData]}
@@ -188,12 +195,13 @@ handle_request(?PRODUCE_REQUEST, _, Data, CorrelationId, Socket) ->
     Results = [{Topic, [{Partition, ?PRODUCE_DISALLOWED_ERROR, 0}
                         || {Partition, _MessageSet} <- PartitionData]}
               || {Topic, PartitionData} <- TopicData],
+    lager:info("at=produce_request error=request_disallowed", []),
     ProduceResponse = vg_protocol:encode_produce_response(Results),
     Size = erlang:iolist_size(ProduceResponse) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ProduceResponse]),
     {error, request_disallowed};
 handle_request(?TOPICS_REQUEST, _Role, <<>>, CorrelationId, Socket) ->
-    Children = get_all_topics(),
+    Children = vg_topics:all(),
     Topics = [vg_protocol:encode_string(T) || T <- Children],
     Response = vg_protocol:encode_array(Topics),
     Size = erlang:iolist_size(Response) + 4,
@@ -209,10 +217,6 @@ decode_partition(<<Partition:32/signed-integer, FetchOffset:64/signed-integer, M
     {{Partition, FetchOffset, MaxBytes}, Rest}.
 
 %%
-
-get_all_topics() ->
-    [Partition || {Partition, _, _, [C]} <- supervisor:which_children(vonnegut_sup),
-                  C == vg_topic_sup].
 
 flush_socket(Socket) ->
     receive

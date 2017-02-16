@@ -53,7 +53,7 @@ write(Topic, Partition, RecordSet) ->
         gen_server:call(?SERVER(Topic, Partition), {write, RecordSet})
     catch _:{noproc, _} ->
             lager:warning("write to nonexistent topic '~s', creating", [Topic]),
-            {ok, _} = vonnegut_sup:create_topic(Topic),
+            {ok, _} = vg_topics_sup:start_child(Topic),
             write(Topic, Partition, RecordSet)
     end.
 
@@ -65,7 +65,7 @@ write(Sender, Topic, Partition, RecordSet) ->
         gen_server:call(?SERVER(Topic, Partition), {write, Sender, RecordSet})
     catch _:{noproc, _} ->
             lager:warning("sender write to nonexistent topic '~s', creating", [Topic]),
-            {ok, _} = vonnegut_sup:create_topic(Topic),
+            {ok, _} = vg_topics_sup:start_child(Topic),
             write(Sender, Topic, Partition, RecordSet)
     end.
 
@@ -73,6 +73,7 @@ ack(Topic, Partition, LatestId) ->
     vg_pending_writes:ack(Topic, Partition, LatestId).
 
 init([Topic, Partition, NextServer, Tab]) ->
+    lager:info("at=init topic=~p next_server=~p", [Topic, NextServer]),
     Config = setup_config(),
     Partition = 0,
     LogDir = Config#config.log_dir,
@@ -95,7 +96,7 @@ init([Topic, Partition, NextServer, Tab]) ->
             last -> last;
             S when is_atom(S) ->
                 lager:info("at=segment_chain_init topic=~p partition=~p next=~p", [Topic, Partition, NextServer]),
-                {ok, SupPid} = vonnegut_sup:create_topic(S, Topic, [Partition]),
+                {ok, SupPid} = vg_topics_sup:start_child(S, Topic, [Partition]),
                 Children = supervisor:which_children(SupPid),
                 [{_, Pid, _, _}] = lists:filter(fun({{T, P}, _, _, _}) ->
                                                         T == Topic andalso P == Partition;
@@ -104,6 +105,7 @@ init([Topic, Partition, NextServer, Tab]) ->
                 Pid
         end,
 
+    vg_topics:update_hwm(Topic, Partition, Id-1),
     {ok, #state{id=Id,
                 next_brick=NextBrick,
                 topic_dir=TopicDir,

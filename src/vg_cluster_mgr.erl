@@ -13,7 +13,8 @@
 %% API
 -export([start_link/3,
          get_map/0,
-         create_topic/1]).
+         create_topic/1,
+         ensure_topic/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -50,10 +51,17 @@ get_map() ->
 create_topic(Topic) ->
     gen_server:call({global, ?SERVER}, {create_topic, Topic}).
 
+-spec ensure_topic(ChainName :: vg_chain_state:chain_name(), Topic :: binary()) -> {error, chain_not_found} |
+                                                                                   {error, topic_exists_other_chain} |
+                                                                                   ok.
+ensure_topic(ChainName, Topic) ->
+    gen_server:call({global, ?SERVER}, {ensure_topic, ChainName, Topic}).
+
 init([ChainName, ChainNodes, DataDir]) ->
     Chain = create_chain(ChainName, ChainNodes),
     State = load_state([Chain], DataDir),
-    {ok, State}.
+    self() ! {ensure_topics, ChainName},
+    {ok, State, 0}.
 
 handle_call(get_map, _From, State=#state{topics=Topics,
                                          chains=Chains,
@@ -69,7 +77,7 @@ handle_call({create_topic, Topic}, _From, State=#state{topics=Topics,
             Chain = lists:nth(Random, Keys),
 
             %% needs to be done on the proper chain
-            {ok, _} = vonnegut_sup:create_topic(Topic),
+            {ok, _} = vg_topics_sup:start_child(Topic),
 
             Topics1 = maps:put(Topic, Chain, Topics),
             {reply, {ok, Chain}, State#state{topics=Topics1,
@@ -77,14 +85,17 @@ handle_call({create_topic, Topic}, _From, State=#state{topics=Topics,
         Chain ->
             lager:info("attempting to create topic that already exists on chain=~p", [Chain]),
             {reply, {error, exists}, State}
-    end.
-
+    end;
+handle_call({ensure_topic, ChainName, Topic}, _From, State) ->
+    {Reply, State} = ensure_topic(ChainName, Topic),
+    {reply, Reply, State}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info(_Info, State) ->
-    {noreply, State}.
+handle_info({ensure_topics, ChainName}, State) ->
+    State1 = ensure_all_topics(ChainName, State),
+    {noreply, State1}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -118,3 +129,38 @@ head([{_, Host, _, ClientPort} | _]) ->
 
 tail(Nodes) ->
     head(lists:reverse(Nodes)).
+
+ensure_all_topics(ChainName, State) ->
+    Topics = vg_utils:topics_on_disk(),
+    lists:foldl(fun({Topic, _}, StateAcc) ->
+                    {_, StateAcc1} = ensure_topic(ChainName, Topic, StateAcc),
+                    StateAcc1
+                end, State, Topics).
+
+ensure_topic(ChainName, Topic, State=#state{topics=Topics,
+                                            chains=Chains,
+                                            epoch=Epoch}) ->
+    case maps:get(Topic, Topics, not_found) of
+        not_found ->
+            case maps:get(ChainName, Chains, not_found) of
+                not_found ->
+                    lager:error("at=ensure_topic error=chain_not_found chain=~s topic=~s", [ChainName, Topic]),
+                    {{error, chain_not_found}, State};
+                _Chain ->
+                    %% needs to be done on the proper chain
+                    {ok, _} = vg_topics_sup:start_child(Topic),
+
+                    Topics1 = maps:put(Topic, ChainName, Topics),
+                    {ok, State#state{topics=Topics1,
+                                              epoch=Epoch+1}}
+            end;
+        ChainName ->
+            %% this is no problem
+            lager:info("attempting to ensure topic that was already started on chain ~p", [ChainName]),
+            {ok, State};
+        OtherChain ->
+            %% this is bad
+            lager:error("attempted to ensure topic on chain ~p that already exists on a different chain ~p",
+                        [ChainName, OtherChain]),
+            {{error, topic_exists_other_chain}, State}
+    end.
