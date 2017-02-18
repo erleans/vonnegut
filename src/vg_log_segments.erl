@@ -72,6 +72,8 @@ find_active_segment(Topic, Partition) ->
       Topic     :: binary(),
       Partition :: integer(),
       RecordId :: integer().
+find_segment_offset(_Topic, _Partition, 0) ->
+    {0, 0};
 find_segment_offset(Topic, Partition, RecordId) ->
     SegmentId = find_log_segment(Topic, Partition, RecordId),
     {SegmentId, find_record_offset(Topic, Partition, SegmentId, RecordId)}.
@@ -94,6 +96,7 @@ find_record_offset(Topic, Partition, SegmentId, RecordId) ->
 
     try
         InitialOffset = vg_index:find_in_index(IndexSegmentFD, SegmentId, RecordId),
+        lager:info("InitialOffset topic=~p segment_id=~p initial_offset=~p", [Topic, SegmentId, InitialOffset]),
         find_in_log(LogSegmentFD, RecordId, InitialOffset)
     after
         file:close(LogSegmentFD),
