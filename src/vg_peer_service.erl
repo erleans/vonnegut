@@ -9,7 +9,7 @@
          stop/1]).
 
 join(Node) ->
-    partisan_peer_service:join(Node, true).
+    partisan_peer_service:join(Node).
 
 leave() ->
     partisan_peer_service:leave([]).

@@ -3,12 +3,11 @@
  {<<"cf">>,{pkg,<<"cf">>,<<"0.2.2">>},1},
  {<<"erlware_commons">>,{pkg,<<"erlware_commons">>,<<"1.0.0">>},0},
  {<<"goldrush">>,{pkg,<<"goldrush">>,<<"0.1.9">>},1},
- {<<"gproc">>,{pkg,<<"gproc">>,<<"0.6.1">>},0},
- {<<"granderl">>,{pkg,<<"granderl">>,<<"0.1.5">>},0},
+ {<<"granderl">>,{pkg,<<"granderl">>,<<"0.1.5">>},1},
  {<<"lager">>,{pkg,<<"lager">>,<<"3.2.4">>},0},
  {<<"partisan">>,{pkg,<<"partisan">>,<<"0.1.1">>},0},
  {<<"rand_compat">>,{pkg,<<"rand_compat">>,<<"0.0.1">>},1},
- {<<"shackle">>,{pkg,<<"shackle">>,<<"0.4.2">>},0},
+ {<<"shackle">>,{pkg,<<"shackle">>,<<"0.4.3">>},0},
  {<<"time_compat">>,{pkg,<<"time_compat">>,<<"0.0.1">>},1},
  {<<"types">>,{pkg,<<"types">>,<<"0.0.1">>},1}]}.
 [
@@ -17,12 +16,11 @@
  {<<"cf">>, <<"7F2913FFF90ABCABD0F489896CFEB0B0674F6C8DF6C10B17A83175448029896C">>},
  {<<"erlware_commons">>, <<"087467DE5833C0BB5B3CCDD387F9E9C1FB816A75B7A709629BF24B5ED3246C51">>},
  {<<"goldrush">>, <<"F06E5D5F1277DA5C413E84D5A2924174182FB108DABB39D5EC548B27424CD106">>},
- {<<"gproc">>, <<"4579663E5677970758A05D8F65D13C3E9814EC707AD51D8DCEF7294EDA1A730C">>},
  {<<"granderl">>, <<"F20077A68BD80B8D8783BD15A052813C6483771DEC1A5B837D307CBE92F14122">>},
  {<<"lager">>, <<"A6DEB74DAE7927F46BD13255268308EF03EB206EC784A94EAF7C1C0F3B811615">>},
  {<<"partisan">>, <<"F2AB3F20DCA4AAE79F428D08911CD98C916745FA06C9C345631EE4F5B2B609A7">>},
  {<<"rand_compat">>, <<"624B590931D27252D0BCF710211699DB3695540706F57D2E91B918A17AB58839">>},
- {<<"shackle">>, <<"DFF9313E79284E01EE00428448C9A99F41AB90248319356E7F219EB845D74442">>},
+ {<<"shackle">>, <<"BDC3F2E1AB19011DBED3D3E55CFEE26FE9F10637805C581AE99DA6E5B14AB946">>},
  {<<"time_compat">>, <<"23FE0AD1FDF3B5B88821B2D04B4B5E865BF587AE66056D671FE0F53514ED8139">>},
  {<<"types">>, <<"0287428C7BCB1643E0C254295E67CEA89E5B9144603955CAC2699C7418A33B1A">>}]}
 ].

@@ -16,7 +16,7 @@
 
 start() ->
     %% maybe start this if it hasn't been
-    application:start(shackle),
+    application:ensure_all_started(shackle),
     case application:get_env(vonnegut, client) of
         {ok, ClientConfig} ->
             case proplists:get_value(endpoints, ClientConfig) of
