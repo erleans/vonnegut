@@ -51,10 +51,10 @@ write(Config) ->
      || _ <- lists:seq(1, rand:uniform(20))],
     Communist =  <<"from each according to their abilities, to "
                    "each according to their needs">>,
-    {ok, #{topic := Topic, offset := R1}} = vg_client:produce(Topic, Communist),
+    {ok, R1} = vg_client:produce(Topic, Communist),
     ct:pal("reply: ~p", [R1]),
-    {ok, #{partitions := [#{record_set := Reply}]}} = vg_client:fetch(Topic, R1),
+    {ok, #{record_set := Reply}} = vg_client:fetch(Topic, R1),
     ?assertMatch([#{record := Communist}], Reply),
 
-    {ok, #{partitions := [#{record_set := Reply1}]}} = vg_client:fetch(Topic, R1 - 1),
+    {ok, #{record_set := Reply1}} = vg_client:fetch(Topic, R1 - 1),
     ?assertMatch([#{record := Anarchist}, #{record := Communist}], Reply1).

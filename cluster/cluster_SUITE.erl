@@ -150,7 +150,7 @@ bootstrap(Config) ->
     {ok, R1} = vg_client:fetch(<<"foo">>),
     ct:pal("r ~p ~p", [R, R1]),
     timer:sleep(1800),
-    ?assertMatch(#{partitions := [#{record_set := [#{record := <<"bar">>}]}]}, R1),
+    ?assertMatch(#{record_set := [#{record := <<"bar">>}]}, R1),
     Config.
 
 roles(Config) ->
@@ -165,18 +165,18 @@ roles(Config) ->
     {ok, WritePool} = vg_client_pool:get_pool(Topic, write),
     {ok, ReadPool} = vg_client_pool:get_pool(Topic, read),
 
-    {ok, R} = shackle:call(WritePool, {fetch, Topic, 0, 12}),
+    {ok, R} = shackle:call(WritePool, {fetch, [{Topic, [{0, 12, 100}]}]}),
     timer:sleep(1000),
-    ?assertMatch(#{partitions := [#{error_code := 129}]}, R),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, R),
 
     %% try to do a write on the tail
-    {ok, R1} =  shackle:call(ReadPool, {produce, Topic, 0, [<<"bar3000">>, <<"barn_owl">>]}),
-    ?assertMatch(#{error_code := 131}, R1),
+    {ok, R1} =  shackle:call(ReadPool, {produce, [{Topic, [{0, [<<"bar3000">>, <<"barn_owl">>]}]}]}),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, R1),
     vg_client_pool:start_pool(middle_end, #{ip => "127.0.0.1", port => 5556}),
 
     %% try to connect the middle of the chain
     ?assertMatch({error, socket_closed},
-                 shackle:call(middle_end, {fetch, Topic, 0, 12})),
+                 shackle:call(middle_end, {fetch, [{Topic, [{0, 12, 100}]}]})),
 
     shackle_pool:stop(middle_end),
     Config.
