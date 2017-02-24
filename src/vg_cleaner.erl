@@ -19,12 +19,15 @@
                 retention_seconds  :: integer(),
                 t_ref              :: timer:tref()}).
 
+%% -define(SERVER(Topic, Partition), {via, vg_pm, {Role, Topic, Partition}}).
+-define(SERVER(Topic, Partition), binary_to_atom(<<"vg_cleaner-", Topic/binary, $-, Partition>>, latin1)).
+
 start_link(Topic, Partition) ->
-    gen_server:start_link({via, gproc, {n,l,{?MODULE,Topic,Partition}}},
-                          ?MODULE, [Topic,Partition], []).
+    gen_server:start_link({local, ?SERVER(Topic, Partition)},
+                          ?MODULE, [Topic, Partition], []).
 
 run_cleaner(Topic, Partition) ->
-    gen_server:call({via, gproc, {n,l,{?MODULE, Topic, Partition}}}, run_cleaner).
+    gen_server:call(?SERVER(Topic, Partition), run_cleaner).
 
 init([Topic, Partition]) ->
     {ok, RetentionCheckMin} = application:get_env(vonnegut, log_retention_check_interval),

@@ -8,11 +8,9 @@
     stdlib,
     lager,
     sasl,
-    gproc,
     acceptor_pool,
     shackle,
     erlware_commons,
-    granderl,
     partisan
    ]},
   {env,[{log_dirs, ["./data"]},

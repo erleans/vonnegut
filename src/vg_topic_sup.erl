@@ -20,7 +20,7 @@
 %%====================================================================
 
 start_link(Topic, Partitions) ->
-    supervisor:start_link({via, gproc, {n,l,Topic}}, ?MODULE, [Topic, Partitions]).
+    supervisor:start_link(?MODULE, [Topic, Partitions]).
 
 %%====================================================================
 %% Supervisor callbacks

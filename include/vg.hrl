@@ -30,8 +30,9 @@
 -define(topic_map, topic_map).
 
 -record(chain, {
-          name :: binary(),
-          head :: {inet:ip_address() | inet:hostname(), inet:port_number()},
-          tail :: {inet:ip_address() | inet:hostname(), inet:port_number()}
+          name  :: binary(),
+          nodes :: [atom()],
+          head  :: {inet:ip_address() | inet:hostname(), inet:port_number()},
+          tail  :: {inet:ip_address() | inet:hostname(), inet:port_number()}
          }).
 -type chain() :: #chain{}.
