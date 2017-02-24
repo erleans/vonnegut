@@ -129,7 +129,8 @@ groups() ->
       [],
       [
        roles,
-       acks
+       acks,
+       concurrent_fetch
       ]}
 
     ].
@@ -187,6 +188,35 @@ acks(Config) ->
     ?assertMatch(ok, check_acks(1000)),
 
     Config.
+
+concurrent_fetch(_Config) ->
+    Topic = vg_test_utils:create_random_name(<<"cluster_concurrent_fetch">>),
+    RandomRecords = [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
+                     crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
+                     crypto:strong_rand_bytes(60)],
+    [vg_client:produce(Topic, RandomRecords) || _ <- lists:seq(0, 100)],
+    Self = self(),
+    [spawn(fun() ->
+               timer:sleep(50),
+               try
+                   [?assertMatch({ok, _}, vg_client:fetch(Topic)) || _ <- lists:seq(0, 10)],
+                   Self ! {done, N}
+               catch
+                   C:T ->
+                       ct:pal("~p ~p ~p", [C, T, erlang:get_stacktrace()]),
+                       Self ! fail
+               end
+          end) || N <- lists:seq(0,  10)],
+
+    receive
+        {done, 10} ->
+            ok;
+        fail ->
+            throw(fail)
+    after
+        100000 ->
+            throw(timeout)
+    end.
 
 check_acks(Timeout) when Timeout =< 0 ->
     {error, timeout};

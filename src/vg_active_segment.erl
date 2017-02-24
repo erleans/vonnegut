@@ -21,7 +21,7 @@
 
 -record(state, {topic_dir   :: file:filename(),
                 id          :: integer(),
-                next_brick  :: node(),
+                next_brick  :: {node(), atom()},
                 byte_count  :: integer(),
                 pos         :: integer(),
                 index_pos   :: integer(),
@@ -34,12 +34,13 @@
                 config      :: #config{}
                }).
 
--define(SERVER(Topic, Partition), {via, gproc, {n,l,{Topic,Partition}}}).
+-define(NEW_SERVER(Topic, Partition), binary_to_atom(<<Topic/binary, $-, Partition>>, latin1)).
+-define(SERVER(Topic, Partition), binary_to_existing_atom(<<Topic/binary, $-, Partition>>, latin1)).
 
 start_link(Topic, Partition, NextBrick) ->
     %% worth the trouble of making sure we have no acks table on tails?
     Tab = vg_pending_writes:ensure_tab(Topic, Partition),
-    gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick, Tab], []).
+    gen_server:start_link({local, ?NEW_SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab], []).
 
 -spec write(Topic, Partition, RecordSet) -> {ok, Offset} | {error, any()} when
       Topic :: binary(),
@@ -72,8 +73,8 @@ write(Sender, Topic, Partition, RecordSet) ->
 ack(Topic, Partition, LatestId) ->
     vg_pending_writes:ack(Topic, Partition, LatestId).
 
-init([Topic, Partition, NextServer, Tab]) ->
-    lager:info("at=init topic=~p next_server=~p", [Topic, NextServer]),
+init([Topic, Partition, NextNode, Tab]) ->
+    lager:info("at=init topic=~p next_server=~p", [Topic, NextNode]),
     Config = setup_config(),
     Partition = 0,
     LogDir = Config#config.log_dir,
@@ -88,26 +89,9 @@ init([Topic, Partition, NextServer, Tab]) ->
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
-    %% Trigger server start on next server
-    NextBrick =
-        case NextServer of
-            solo -> solo;
-            tail -> tail;
-            last -> last;
-            S when is_atom(S) ->
-                lager:info("at=segment_chain_init topic=~p partition=~p next=~p", [Topic, Partition, NextServer]),
-                {ok, SupPid} = vg_topics_sup:start_child(S, Topic, [Partition]),
-                Children = supervisor:which_children(SupPid),
-                [{_, Pid, _, _}] = lists:filter(fun({{T, P}, _, _, _}) ->
-                                                        T == Topic andalso P == Partition;
-                                                   (_) -> false
-                                                end, Children),
-                Pid
-        end,
-
     vg_topics:update_hwm(Topic, Partition, Id-1),
     {ok, #state{id=Id,
-                next_brick=NextBrick,
+                next_brick={?SERVER(Topic, Partition), NextNode},
                 topic_dir=TopicDir,
                 byte_count=0,
                 pos=Position,
@@ -127,9 +111,9 @@ handle_call({write, RecordSet}, _From, State=#state{id=Id,
                                                     next_brick=NextBrick}) ->
     State1 = write_record_set(RecordSet, State),
     case NextBrick of
-        solo -> ok;
-        tail -> ok;
-        last -> ok;
+        {_, solo} -> ok;
+        {_, tail} -> ok;
+        {_, last} -> ok;
         _ ->
             gen_server:cast(NextBrick, {write, self(), RecordSet})
     end,
@@ -146,9 +130,9 @@ handle_cast({write, Sender, RecordSet}, State=#state{topic=Topic,
                                                      next_brick=NextBrick}) ->
     State1 = write_record_set(RecordSet, State),
     case NextBrick of
-        solo -> ok;
-        tail -> ok;
-        last -> ok;
+        {_, solo} -> ok;
+        {_, tail} -> ok;
+        {_, last} -> ok;
         _ ->
             gen_server:cast(NextBrick, {write, self(), RecordSet})
     end,
@@ -189,8 +173,8 @@ write_record_set(RecordSet, State=#state{history_tab=Tab, next_brick=Next}) ->
 
                     case Next of
                         %%solo -> ok;
-                        last -> ok;
-                        tail -> ok;
+                        {_, last} -> ok;
+                        {_, tail} -> ok;
                         _ ->
                             vg_pending_writes:add(Tab, Id, Bytes)
                     end,

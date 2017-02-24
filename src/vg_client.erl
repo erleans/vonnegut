@@ -20,6 +20,8 @@
           buffer          = <<>> :: binary()
          }).
 
+-define(TIMEOUT, 5000).
+
 -spec metadata() -> {ok, {Chains :: vg_cluster_mgr:chains_map(),
                           Topics :: vg_cluster_mgr:topics_map()}}.
 metadata() ->
@@ -28,7 +30,7 @@ metadata() ->
 -spec ensure_topic(Topic :: vg:topic()) -> {ok, {Chains :: vg_cluster_mgr:chains_map(),
                                                  Topics :: vg_cluster_mgr:topics_map()}}.
 ensure_topic(Topic) ->
-    Result = shackle:call(metadata, {metadata, [Topic]}, 5000),
+    Result = shackle:call(metadata, {metadata, [Topic]}, ?TIMEOUT),
     vg_client_pool:refresh_topic_map(),
     Result.
 
@@ -39,14 +41,14 @@ fetch(Topic) ->
 fetch(Topic, Position) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    shackle:call(Pool, {fetch, Topic, 0, Position}, 5000).
+    shackle:call(Pool, {fetch, Topic, 0, Position}, ?TIMEOUT).
 
 -spec produce(Topic :: vg:topic(), RecordSet :: vg:record_set())
              -> {ok, #{topic := vg:topic(), offset := integer()}}.
 produce(Topic, RecordSet) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, write),
     lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
-    shackle:call(Pool, {produce, Topic, 0, RecordSet}, 5000).
+    shackle:call(Pool, {produce, Topic, 0, RecordSet}, ?TIMEOUT).
 
 -spec init() -> {ok, term()}.
 init() ->
@@ -78,7 +80,6 @@ handle_request({fetch, Topic, Partition, Position}, #state {
     MinBytes = 100,
     Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{Partition, Position, 100}]}]),
     Data = vg_protocol:encode_request(?FETCH_REQUEST, RequestId, ?CLIENT_ID, Request),
-
     {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?FETCH_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
@@ -108,17 +109,21 @@ handle_request(topics, #state {
                  request_counter = RequestCounter + 1}}.
 
 -spec handle_data(binary(), term()) -> {ok, term(), term()}.
-handle_data(Data, State=#state{buffer=Buffer,
-                               corids=CorIds}) ->
+handle_data(Data, State=#state{buffer=Buffer}) ->
     Data2 = <<Buffer/binary, Data/binary>>,
-    case vg_protocol:decode_response(Data2) of
+    decode_data(Data2, [], State).
+
+decode_data(<<>>, Replies, State) ->
+    {ok, Replies, State};
+decode_data(Data, Replies, State=#state{corids=CorIds}) ->
+    case vg_protocol:decode_response(Data) of
         more ->
-            {ok, [], State#state{buffer = <<Buffer/binary, Data/binary>>}};
+            {ok, Replies, State#state{buffer = Data}};
         {CorrelationId, Response, Rest} ->
             Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
-            lager:debug("cli result ~p ~p", [Response, Result]),
-            {ok, [{CorrelationId, {ok, Result}}], State#state{corids = maps:remove(CorrelationId, CorIds),
-                                                        buffer = Rest}}
+            decode_data(Rest, [{CorrelationId, {ok, Result}} | Replies],
+                        State#state{corids = maps:remove(CorrelationId, CorIds),
+                                    buffer = <<>>})
     end.
 
 -spec terminate(term()) -> ok.

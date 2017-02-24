@@ -32,11 +32,10 @@ start_child(Topic, Partitions) ->
     start_child(local, Topic, Partitions).
 
 start_child(Server0, Topic, Partitions) ->
-    Server =
-        case Server0 of
-            local -> ?SERVER;
-            _ -> {?SERVER, Server0}
-        end,
+    Server = case Server0 of
+                 local -> ?SERVER;
+                 _ -> {?SERVER, Server0}
+             end,
     lager:info("at=create_topic node=~p topic=~p partitions=~p target=~p",
                [node(), Topic, Partitions, Server0]),
     supervisor:start_child(Server, [Topic, Partitions]).

@@ -76,8 +76,9 @@ handle_call({create_topic, Topic}, _From, State=#state{topics=Topics,
             Random = rand:uniform(length(Keys)),
             Chain = lists:nth(Random, Keys),
 
-            %% needs to be done on the proper chain
-            {ok, _} = vg_topics_sup:start_child(Topic),
+            %% start topic process on all nodes in the chain
+            #chain{nodes=Nodes} = maps:get(Chain, Chains),
+            [{ok, _} = vg_topics_sup:start_child(Node, Topic, [0]) || Node <- Nodes],
 
             Topics1 = maps:put(Topic, Chain, Topics),
             {reply, {ok, Chain}, State#state{topics=Topics1,
@@ -108,13 +109,18 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 create_chain(Name, []) ->
-    #chain{name = Name,
-           head = {"127.0.0.1", 5555},
-           tail = {"127.0.0.1", 5555}};
+    #chain{name  = Name,
+           nodes = [node()],
+           head  = {"127.0.0.1", 5555},
+           tail  = {"127.0.0.1", 5555}};
 create_chain(Name, Nodes) ->
-    #chain{name = Name,
-           head = head(Nodes),
-           tail = tail(Nodes)}.
+    #chain{name  = Name,
+           nodes = [nodename(Node) || Node <- Nodes],
+           head  = head(Nodes),
+           tail  = tail(Nodes)}.
+
+nodename({Name, Host, _, _}) ->
+    list_to_atom(atom_to_list(Name) ++ "@" ++ Host).
 
 load_state(Chains, _DataDir) ->
     ChainsMap = lists:foldl(fun(Chain=#chain{name=Name}, Acc) ->
@@ -146,9 +152,9 @@ ensure_topic(ChainName, Topic, State=#state{topics=Topics,
                 not_found ->
                     lager:error("at=ensure_topic error=chain_not_found chain=~s topic=~s", [ChainName, Topic]),
                     {{error, chain_not_found}, State};
-                _Chain ->
-                    %% needs to be done on the proper chain
-                    {ok, _} = vg_topics_sup:start_child(Topic),
+                #chain{nodes=Nodes} ->
+                    %% start topic process on all nodes in the chain
+                    [{ok, _} = vg_topics_sup:start_child(Node, Topic, [0]) || Node <- Nodes],
 
                     Topics1 = maps:put(Topic, ChainName, Topics),
                     {ok, State#state{topics=Topics1,

@@ -43,7 +43,7 @@ write(Topic, RecordSet) when is_list(RecordSet) ->
 fetch(Topic) ->
     fetch(Topic, 0).
 
--spec fetch(Topic, Offset) -> RecordSet when
+-spec fetch(Topic, Offset) -> {ok, RecordSet} when
       Topic :: topic(),
       Offset :: integer(),
       RecordSet :: #{high_water_mark := integer(),
@@ -57,6 +57,6 @@ fetch(Topic, Offset) ->
     {ok, Fd} = file:open(File, [read, binary, raw]),
     {ok, [Data]} = file:pread(Fd, [{Position, Size}]),
     file:close(Fd),
-    #{high_water_mark => vg_topics:lookup_hwm(Topic, Partition),
-      partition => 0,
-      record_set => vg_protocol:decode_record_set(Data, [])}.
+    {ok, #{high_water_mark => vg_topics:lookup_hwm(Topic, Partition),
+           partition => 0,
+           record_set => vg_protocol:decode_record_set(Data, [])}}.
