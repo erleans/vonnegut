@@ -43,7 +43,7 @@ write(Topic, RecordSet) when is_list(RecordSet) ->
 fetch(Topic) ->
     fetch(Topic, 0).
 
--spec fetch(Topic, Offset) -> RecordSet when
+-spec fetch(Topic, Offset) -> {ok, RecordSet} when
       Topic :: topic(),
       Offset :: integer(),
       RecordSet :: #{high_water_mark := integer(),

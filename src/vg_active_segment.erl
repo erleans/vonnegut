@@ -21,7 +21,7 @@
 
 -record(state, {topic_dir   :: file:filename(),
                 id          :: integer(),
-                next_brick  :: node(),
+                next_brick  :: {node(), atom()},
                 byte_count  :: integer(),
                 pos         :: integer(),
                 index_pos   :: integer(),

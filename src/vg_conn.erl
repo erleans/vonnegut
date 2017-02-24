@@ -103,7 +103,7 @@ handle_data(<<Size:32/signed-integer, Message:Size/binary, Rest/binary>>,
         {error, Reason} ->
             {error, Reason};
         _ ->
-            {ok, Rest}
+            handle_data(Rest, Role, Socket)
     end;
 handle_data(Data, _Role, _Socket) ->
     {ok, Data}.
@@ -162,6 +162,7 @@ handle_request(?FETCH_REQUEST, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTim
         ErrorCode = 0,
         HighWaterMark = vg_topics:lookup_hwm(Topic, Partition),
         Response = vg_protocol:encode_fetch_response(Topic, Partition, ErrorCode, HighWaterMark, Bytes),
+        lager:info("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
         gen_tcp:send(Socket, [<<(Bytes + 4 + iolist_size(Response)):32/signed-integer,
                                 CorrelationId:32/signed-integer>>, Response]),
         {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, [])

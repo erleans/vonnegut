@@ -1,5 +1,5 @@
 -define(CLIENT_ID, "vg_client").
--define(MAX_REQUEST_ID, 4294967296).
+-define(MAX_REQUEST_ID, 2147483647).
 
 -define(MAGIC, 1).
 -define(API_VERSION, 1).
@@ -31,7 +31,7 @@
 
 -record(chain, {
           name  :: binary(),
-          nodes :: [atom()],
+          nodes :: [atom()] | undefined,
           head  :: {inet:ip_address() | inet:hostname(), inet:port_number()},
           tail  :: {inet:ip_address() | inet:hostname(), inet:port_number()}
          }).
