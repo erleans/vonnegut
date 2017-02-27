@@ -125,7 +125,7 @@ start_pool(Name, Opts) ->
                         {socket_options, SocketOpts}],
                        [{backlog_size, 1024},
                         {pool_size, ClientPoolSize},
-                        {pool_strategy, random}]).
+                        {pool_strategy, round_robin}]).
 
 stop() ->
     [shackle_pool:stop(Pool)
