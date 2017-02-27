@@ -257,20 +257,16 @@ decode_partition_metadata(<<_PartitionErrorCode:16/signed-integer, PartitionId:3
 
 decode_produce_response(Response) ->
     {TopicResults, _Rest}= decode_array(fun decode_produce_response_topics/1, Response),
-    [{Topic, [{Partition, ErrorCode, Offset}]}] = TopicResults,
-    %% we're currently not including throttle time or timestamp
-    #{topic => Topic,
-      partition => Partition,
-      offset => Offset,
-      error_code => ErrorCode}.
+    maps:from_list(TopicResults).
 
 decode_produce_response_topics(<<Size:16/signed-integer, Topic:Size/binary, PartitionsRaw/binary>>) ->
     {Partitions, Rest} = decode_array(fun decode_produce_response_partitions/1, PartitionsRaw),
-    {{Topic, Partitions}, Rest}.
+    {{Topic, maps:from_list(Partitions)}, Rest}.
 
 decode_produce_response_partitions(<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
                                      Offset:64/signed-integer, Rest/binary>>) ->
-    {{Partition, ErrorCode, Offset}, Rest}.
+    {{Partition, #{error_code => ErrorCode,
+                   offset => Offset}}, Rest}.
 
 decode_topics_response(Msg) ->
     {Topics, _Rest} = decode_array(fun decode_topics/1, Msg),
@@ -281,18 +277,15 @@ decode_topics(<<Size:16/signed-integer, Topic:Size/bytes, Rest/binary>>) ->
 
 decode_fetch_response(Msg) ->
     case decode_array(fun decode_fetch_topic/1, Msg) of
-        %% TODO: unwrapping the topic here because we don't currently
-        %% handle multiple topics.  it might be easiest to roll this
-        %% up into a map of topics => responses rather than an array
-        {[Topic], _Rest} ->
-            Topic;
+        {Topics, _Rest} ->
+            maps:from_list(Topics);
         more -> more
     end.
 
 decode_fetch_topic(<<Sz:16/signed-integer, Topic:Sz/binary, Partitions/binary>>) ->
     case decode_array(fun decode_fetch_partition/1, Partitions) of
         {DecPartitions, Rest} ->
-            {#{topic => Topic, partitions => DecPartitions}, Rest};
+            {{Topic, maps:from_list(DecPartitions)}, Rest};
         more -> more
     end.
 
@@ -302,11 +295,10 @@ decode_fetch_partition(<<Partition:32/signed-integer, ErrorCode:16/signed-intege
     %% there are a number of fields that we're not including currently:
     %% - throttle time
     %% - topic name
-    {#{high_water_mark => HighWaterMark,
-       partition => Partition,
-       record_set_size => Bytes,
-       error_code => ErrorCode,
-       record_set => decode_record_set(RecordSet, [])}, Rest};
+    {{Partition, #{high_water_mark => HighWaterMark,
+                  record_set_size => Bytes,
+                  error_code => ErrorCode,
+                  record_set => decode_record_set(RecordSet, [])}}, Rest};
 decode_fetch_partition(_) ->
     more.
 

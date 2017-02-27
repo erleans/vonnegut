@@ -34,21 +34,45 @@ ensure_topic(Topic) ->
     vg_client_pool:refresh_topic_map(),
     Result.
 
--spec fetch(Topic :: vg:topic()) -> {ok, maps:map()}.
-fetch(Topic) ->
+-spec fetch(Topic)
+           -> {ok, #{high_water_mark := integer(),
+                     record_set_size := integer(),
+                     error_code := integer(),
+                     record_set := RecordSet}}
+                  when Topic :: vg:topic() | [{vg:topic(), [{integer(), integer(), integer()}]}],
+                       RecordSet :: vg:record_set().
+fetch(Topic) when is_binary(Topic) ->
     fetch(Topic, 0).
 
 fetch(Topic, Position) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    shackle:call(Pool, {fetch, Topic, 0, Position}, ?TIMEOUT).
+    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, 100}]}]}, ?TIMEOUT) of
+        {ok, #{Topic := #{0 := Result=#{error_code := 0}}}} ->
+            {ok, Result};
+        {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
+            {error, ErrorCode};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
--spec produce(Topic :: vg:topic(), RecordSet :: vg:record_set())
-             -> {ok, #{topic := vg:topic(), offset := integer()}}.
+-spec produce(Topic, RecordSet)
+             -> {ok, integer()}
+                    when Topic :: vg:topic(),
+                         RecordSet :: vg:record_set().
 produce(Topic, RecordSet) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, write),
     lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
-    shackle:call(Pool, {produce, Topic, 0, RecordSet}, ?TIMEOUT).
+    TopicRecords = [{Topic, [{0, RecordSet}]}],
+    case shackle:call(Pool, {produce, TopicRecords}, ?TIMEOUT) of
+        {ok, #{Topic := #{0 := #{error_code := 0,
+                                 offset := Offset}}}} ->
+            {ok, Offset};
+        {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
+            {error, ErrorCode};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 -spec init() -> {ok, term()}.
 init() ->
@@ -70,7 +94,7 @@ handle_request({metadata, Topics}, #state {
     {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?METADATA_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
-handle_request({fetch, Topic, Partition, Position}, #state {
+handle_request({fetch, TopicOffsets}, #state {
                  request_counter = RequestCounter,
                  corids = CorIds
                 } = State) ->
@@ -78,12 +102,12 @@ handle_request({fetch, Topic, Partition, Position}, #state {
     ReplicaId = -1,
     MaxWaitTime = 5000,
     MinBytes = 100,
-    Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{Partition, Position, 100}]}]),
+    Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, TopicOffsets),
     Data = vg_protocol:encode_request(?FETCH_REQUEST, RequestId, ?CLIENT_ID, Request),
     {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?FETCH_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
-handle_request({produce, Topic, Partition, Records}, #state {
+handle_request({produce, TopicRecords}, #state {
                  request_counter = RequestCounter,
                  corids = CorIds
                 } = State) ->
@@ -91,8 +115,7 @@ handle_request({produce, Topic, Partition, Records}, #state {
     RequestId = request_id(RequestCounter),
     Acks = 0,
     Timeout = 5000,
-    TopicData = [{Topic, [{Partition, Records}]}],
-    Request = vg_protocol:encode_produce(Acks, Timeout, TopicData),
+    Request = vg_protocol:encode_produce(Acks, Timeout, TopicRecords),
     Data = vg_protocol:encode_request(?PRODUCE_REQUEST, RequestId, ?CLIENT_ID, Request),
 
     {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
