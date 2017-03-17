@@ -57,7 +57,7 @@ fetch(Topic, Position) ->
     end.
 
 -spec produce(Topic, RecordSet)
-             -> {ok, integer()}
+             -> {ok, integer()} | {error, term()}
                     when Topic :: vg:topic(),
                          RecordSet :: vg:record_set().
 produce(Topic, RecordSet) ->

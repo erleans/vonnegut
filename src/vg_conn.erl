@@ -181,9 +181,7 @@ handle_request(?FETCH_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signe
     {error, request_disallowed};
 handle_request(?PRODUCE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
-    lager:info("at=produce_request", []),
     Results = [{Topic, [begin
-                            lager:info("at=produce_request_write topic=~s partition=~p", [Topic, Partition]),
                             {ok, Offset} = vg_active_segment:write(Topic, Partition, MessageSet),
                             {Partition, ?NONE_ERROR, Offset}
                         end || {Partition, MessageSet} <- PartitionData]}
