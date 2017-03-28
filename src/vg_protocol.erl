@@ -13,7 +13,7 @@
          encode_string/1,
          encode_bytes/1,
          encode_produce_response/1,
-         encode_fetch_response/5,
+         encode_fetch_topic_response/4,
          decode_array/2,
          decode_record_set/1,
 
@@ -147,9 +147,8 @@ encode_produce_response_partitions(Partitions) ->
     encode_array([<<Partition:32/signed-integer, ErrorCode:16/signed-integer, Offset:64/signed-integer>>
                      || {Partition, ErrorCode, Offset} <- Partitions]).
 
-encode_fetch_response(Topic, Partition, ErrorCode, HighWaterMark, Bytes) ->
-    encode_array([[encode_string(Topic), encode_array([<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
-                                                         HighWaterMark:64/signed-integer, Bytes:32/signed-integer>>])]]).
+encode_fetch_topic_response(Partition, ErrorCode, HighWaterMark, Bytes) ->
+    <<Partition:32/signed-integer, ErrorCode:16/signed-integer, HighWaterMark:64/signed-integer, Bytes:32/signed-integer>>.
 
 encode_metadata_response(Brokers, TopicMetadata) ->
     [encode_brokers(Brokers), encode_topic_metadata(TopicMetadata)].

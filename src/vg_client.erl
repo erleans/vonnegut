@@ -47,25 +47,63 @@ ensure_topic(Pool, Topic) ->
                      record_set := RecordSet}}
                   when Topic :: vg:topic() | [{vg:topic(), [{integer(), integer(), integer()}]}],
                        RecordSet :: vg:record_set().
+
+%% if we don't want to expose the tuple in the second clauses of
+%% fetch/1 and fetch/2, we could do something like fetch_partial,
+%% which would return the tuple and options, which then could be fed
+%% into an execute_multifetch function which would do the right thing.
+
 fetch(Topic) when is_binary(Topic) ->
-    fetch(Topic, 0).
+    do_fetch([{Topic, 0, 0}], #{});
+fetch(Requests) when is_list(Requests) ->
+    do_fetch(Requests, #{}).
 
-fetch(Topic, Position) ->
-    fetch(Topic, Position, #{}).
+fetch(Topic, Position) when is_binary(Topic) ->
+    do_fetch([{Topic, Position, 0}], #{});
+fetch(Requests, Opts) when is_list(Requests) ->
+    do_fetch(Requests, Opts).
 
-fetch(Topic, Position, Opts) ->
+fetch(Topic, Position, MaxBytes) when is_binary(Topic) ->
+    do_fetch([{Topic, Position, MaxBytes}], #{}).
+
+do_fetch(Requests, Opts) ->
     Timeout = maps:get(timeout, Opts, ?TIMEOUT),
-    MaxBytes = maps:get(max_bytes, Opts, 0),
-    {ok, Pool} = vg_client_pool:get_pool(Topic, read),
-    lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, MaxBytes}]}]}, Timeout) of
-        {ok, #{Topic := #{0 := Result=#{error_code := 0}}}} ->
-            {ok, Result};
-        {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
-            {error, ErrorCode};
-        {error, Reason} ->
-            {error, Reason}
-    end.
+    PoolReqs =
+        lists:foldl(
+          fun({Topic, _Position, _MaxBytes} = R, Acc) ->
+                  {ok, Pool} = vg_client_pool:get_pool(Topic, read),
+                  lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
+                  case Acc of
+                      #{Pool := PoolReqs} ->
+                          Acc#{Pool => [R | PoolReqs]};
+                      _ ->
+                          Acc#{Pool => [R]}
+                  end
+          end, #{}, Requests),
+    %% should we do these in parallel?
+    Resps = maps:map(
+              fun(Pool, TPM0) ->
+                      TPM = [{Topic, [{0, Position, MaxBytes}]}
+                             || {Topic, Position, MaxBytes} <- TPM0],
+                      case shackle:call(Pool, {fetch, TPM}, Timeout) of
+                          {ok, Result} ->
+                              %% if there are any error codes in any
+                              %% of these, transform the whole thing
+                              %% into an error
+                              {ok, Result};
+                          {error, Reason} ->
+                              {error, Reason}
+                      end
+              end, PoolReqs),
+    lists:foldl(
+      fun(_, {error, Response}) ->
+              {error, Response};
+         ({_Pool, {ok, Response}}, {ok, Acc}) ->
+              {ok, maps:merge(Acc, Response)};
+         ({_Pool, {error, Response}}, _) ->
+              {error, Response}
+      end,
+      {ok, #{}}, maps:to_list(Resps)).
 
 -spec produce(Topic, RecordSet)
              -> {ok, integer()} | {error, term()}
