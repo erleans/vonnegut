@@ -119,8 +119,8 @@ create_chain(Name, Nodes) ->
            head  = head(Nodes),
            tail  = tail(Nodes)}.
 
-nodename({Name, Host, _, _}) ->
-    list_to_atom(atom_to_list(Name) ++ "@" ++ Host).
+nodename({Name, _Host, _, _}) ->
+    Name.
 
 load_state(Chains, _DataDir) ->
     ChainsMap = lists:foldl(fun(Chain=#chain{name=Name}, Acc) ->
