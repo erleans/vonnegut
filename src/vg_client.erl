@@ -42,19 +42,14 @@ ensure_topic(Topic) ->
                   when Topic :: vg:topic() | [{vg:topic(), [{integer(), integer(), integer()}]}],
                        RecordSet :: vg:record_set().
 fetch(Topic) when is_binary(Topic) ->
-    fetch(Topic, 0).
+    fetch([{Topic, 0}]);
+fetch(TopicPositions=[{Topic, _} | _]) ->
+    {ok, Pool} = vg_client_pool:get_pool(Topic, read),
+    lager:debug("fetch request to pool: ~p", [Pool]),
+    shackle:call(Pool, {fetch, [{T, [{0, Position, 100}]} || {T, Position} <- TopicPositions]}, ?TIMEOUT).
 
 fetch(Topic, Position) ->
-    {ok, Pool} = vg_client_pool:get_pool(Topic, read),
-    lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, 100}]}]}, ?TIMEOUT) of
-        {ok, #{Topic := #{0 := Result=#{error_code := 0}}}} ->
-            {ok, Result};
-        {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
-            {error, ErrorCode};
-        {error, Reason} ->
-            {error, Reason}
-    end.
+    fetch([{Topic, Position}]).
 
 -spec produce(Topic, RecordSet)
              -> {ok, integer()} | {error, term()}
