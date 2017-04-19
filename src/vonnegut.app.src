@@ -15,7 +15,7 @@
    ]},
   {env,[{log_dirs, ["./data"]},
         {acceptor_pool_size, 10},
-        {client_pool_size, 2},
+        {client_pool_size, 10},
 
         {send_buffer_bytes, 102400},
 

@@ -237,9 +237,10 @@ concurrent_perf(_Config) ->
     [vg_client:produce(Topic2, RandomRecords) || _ <- lists:seq(1, Scale)],
     [vg_client:produce(Topic3, RandomBigRecords) || _ <- lists:seq(1, Scale)],
 
+    Pids = 3,
     Self = self(),
     LoadEnd = erlang:monotonic_time(milli_seconds),
-    timer:sleep(2000),
+    timer:sleep(8000),
     RetrieveStart = erlang:monotonic_time(milli_seconds),
     [begin
          F = fun(ID) ->
@@ -267,14 +268,14 @@ concurrent_perf(_Config) ->
                      end
              end,
          spawn(fun() -> F(N) end)
-     end || N <- lists:seq(0,  10)],
+     end || N <- lists:seq(0,  Pids)],
 
     [receive
          done -> ok;
          fail -> throw(fail)
      after
          1000000 -> throw(timeout)
-     end || _ <- lists:seq(0, 10)],
+     end || _ <- lists:seq(0, Pids)],
     RetrieveEnd = erlang:monotonic_time(milli_seconds),
     LoadDiff = LoadEnd - LoadStart,
     RetDiff = RetrieveEnd - RetrieveStart,
