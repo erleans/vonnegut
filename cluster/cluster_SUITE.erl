@@ -237,10 +237,10 @@ concurrent_perf(_Config) ->
     [vg_client:produce(Topic2, RandomRecords) || _ <- lists:seq(1, Scale)],
     [vg_client:produce(Topic3, RandomBigRecords) || _ <- lists:seq(1, Scale)],
 
-    Pids = 3,
+    Pids = 12,
     Self = self(),
     LoadEnd = erlang:monotonic_time(milli_seconds),
-    timer:sleep(8000),
+    timer:sleep(2000),
     RetrieveStart = erlang:monotonic_time(milli_seconds),
     [begin
          F = fun(ID) ->
