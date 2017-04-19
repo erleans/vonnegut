@@ -4,7 +4,7 @@
 
 -export([metadata/0,
          ensure_topic/1,
-         fetch/1, fetch/2,
+         fetch/1, fetch/2, fetch/3,
          produce/2,
          init/0,
          setup/2,
@@ -45,9 +45,12 @@ fetch(Topic) when is_binary(Topic) ->
     fetch(Topic, 0).
 
 fetch(Topic, Position) ->
+    fetch(Topic, Position, ?TIMEOUT).
+
+fetch(Topic, Position, Timeout) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, 100}]}]}, ?TIMEOUT) of
+    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, 100}]}]}, Timeout) of
         {ok, #{Topic := #{0 := Result=#{error_code := 0}}}} ->
             {ok, Result};
         {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->

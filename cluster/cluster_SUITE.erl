@@ -218,6 +218,70 @@ concurrent_fetch(_Config) ->
             throw(timeout)
     end.
 
+
+%% to run this test: rebar3 ct --dir=cluster --sys_config=cluster/sys.config --suite=cluster_SUITE --case=concurrent_perf
+concurrent_perf(_Config) ->
+    Topic1 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf1">>),
+    Topic2 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf2">>),
+    Topic3 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf3">>),
+
+    RandomRecords = [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
+                     crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
+                     crypto:strong_rand_bytes(60)],
+    RandomBigRecords = [crypto:strong_rand_bytes(6000), crypto:strong_rand_bytes(60000),
+                        crypto:strong_rand_bytes(600), crypto:strong_rand_bytes(600),
+                        crypto:strong_rand_bytes(6000)],
+    Scale = 1000,
+    LoadStart = erlang:monotonic_time(milli_seconds),
+    [vg_client:produce(Topic1, RandomRecords) || _ <- lists:seq(1, Scale)],
+    [vg_client:produce(Topic2, RandomRecords) || _ <- lists:seq(1, Scale)],
+    [vg_client:produce(Topic3, RandomBigRecords) || _ <- lists:seq(1, Scale)],
+
+    Self = self(),
+    LoadEnd = erlang:monotonic_time(milli_seconds),
+    timer:sleep(2000),
+    RetrieveStart = erlang:monotonic_time(milli_seconds),
+    [begin
+         F = fun(ID) ->
+                     %%timer:sleep(50),
+                     try
+                         Topic = case ID rem 3 of
+                                     0 -> Topic1;
+                                     1 -> Topic2;
+                                     2 -> Topic3
+                                 end,
+                         %%[
+                         FetchStart = erlang:monotonic_time(milli_seconds),
+                         {ok, #{record_set := L}} = vg_client:fetch(Topic, 0, 60000),
+                         FetchEnd = erlang:monotonic_time(milli_seconds),
+                         ?assertEqual(Scale * length(RandomRecords), length(L)),
+                         %%?assertEqual(500, length(L)),
+                         %%|| _ <- lists:seq(0, 10)],
+                         Self ! done,
+                         io:fwrite(standard_error, "thread ~p fetch on topic ~p completed in ~p ms~n",
+                                   [ID, Topic, FetchEnd - FetchStart])
+                     catch
+                         C:T ->
+                             ct:pal("~p ~p ~p", [C, T, erlang:get_stacktrace()]),
+                             Self ! fail
+                     end
+             end,
+         spawn(fun() -> F(N) end)
+     end || N <- lists:seq(0,  10)],
+
+    [receive
+         done -> ok;
+         fail -> throw(fail)
+     after
+         1000000 -> throw(timeout)
+     end || _ <- lists:seq(0, 10)],
+    RetrieveEnd = erlang:monotonic_time(milli_seconds),
+    LoadDiff = LoadEnd - LoadStart,
+    RetDiff = RetrieveEnd - RetrieveStart,
+    io:fwrite(standard_error, "load ~p ret ~p ~n ~n", [LoadDiff, RetDiff]),
+    %%throw(gimmelogs),
+    ok.
+
 check_acks(Timeout) when Timeout =< 0 ->
     {error, timeout};
 check_acks(Timeout) ->

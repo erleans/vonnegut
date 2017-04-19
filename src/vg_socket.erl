@@ -25,13 +25,13 @@ start_link() ->
 init([]) ->
     Port = vg_config:port(),
     AcceptorPoolSize = application:get_env(vonnegut, acceptor_pool_size, 10),
-    % Trapping exit so can close socket in terminate/2
+    %% Trapping exit so can close socket in terminate/2
     _ = process_flag(trap_exit, true),
     Opts = [{active, once}, {reuseaddr, true}, {buffer, 65535},
             {nodelay, true}, {mode, binary}, {packet, raw}],
     case gen_tcp:listen(Port, Opts) of
         {ok, Socket} ->
-            % acceptor could close the socket if there is a problem
+            %% acceptor could close the socket if there is a problem
             MRef = monitor(port, Socket),
             vg_pool:accept_socket(Socket, AcceptorPoolSize),
             {ok, {Socket, MRef}};

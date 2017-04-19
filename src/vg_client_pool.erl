@@ -109,7 +109,7 @@ maybe_init_ets(_) ->
     end.
 
 start_pool(Name, Opts) ->
-    ClientPoolSize = application:get_env(vonnegut, client_pool_size, 2),
+    ClientPoolSize = application:get_env(vonnegut, client_pool_size, 10),
     SocketOpts = [binary,
                   {buffer, 65535},
                   {nodelay, true},
@@ -125,7 +125,7 @@ start_pool(Name, Opts) ->
                         {socket_options, SocketOpts}],
                        [{backlog_size, 1024},
                         {pool_size, ClientPoolSize},
-                        {pool_strategy, round_robin}]).
+                        {pool_strategy, random}]).
 
 stop() ->
     [shackle_pool:stop(Pool)
