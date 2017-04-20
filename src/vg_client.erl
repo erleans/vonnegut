@@ -4,7 +4,7 @@
 
 -export([metadata/0,
          ensure_topic/1,
-         fetch/1, fetch/2,
+         fetch/1, fetch/2, fetch/3,
          produce/2,
          init/0,
          setup/2,
@@ -17,7 +17,8 @@
 -record(state, {
           request_counter = 0    :: non_neg_integer(),
           corids          = #{}  :: maps:map(),
-          buffer          = <<>> :: binary()
+          buffer          = <<>> :: binary(),
+          expected_size   = 0    :: non_neg_integer()
          }).
 
 -define(TIMEOUT, 5000).
@@ -45,9 +46,12 @@ fetch(Topic) when is_binary(Topic) ->
     fetch(Topic, 0).
 
 fetch(Topic, Position) ->
+    fetch(Topic, Position, ?TIMEOUT).
+
+fetch(Topic, Position, Timeout) ->
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, 100}]}]}, ?TIMEOUT) of
+    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, 100}]}]}, Timeout) of
         {ok, #{Topic := #{0 := Result=#{error_code := 0}}}} ->
             {ok, Result};
         {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
@@ -138,15 +142,23 @@ handle_data(Data, State=#state{buffer=Buffer}) ->
 
 decode_data(<<>>, Replies, State) ->
     {ok, Replies, State};
-decode_data(Data, Replies, State=#state{corids=CorIds}) ->
-    case vg_protocol:decode_response(Data) of
-        more ->
-            {ok, Replies, State#state{buffer = Data}};
-        {CorrelationId, Response, Rest} ->
-            Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
-            decode_data(Rest, [{CorrelationId, {ok, Result}} | Replies],
-                        State#state{corids = maps:remove(CorrelationId, CorIds),
-                                    buffer = <<>>})
+decode_data(Data, Replies, State=#state{corids=CorIds, expected_size = Exp}) ->
+    case Exp of
+        N when N == 0 orelse byte_size(Data) >= N ->
+            case vg_protocol:decode_response(Data) of
+                more ->
+                    {ok, Replies, State#state{buffer = Data}};
+                {more, Size} ->
+                    {ok, Replies, State#state{buffer = Data, expected_size = Size}};
+                {CorrelationId, Response, Rest} ->
+                    Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
+                    decode_data(Rest, [{CorrelationId, {ok, Result}} | Replies],
+                                State#state{corids = maps:remove(CorrelationId, CorIds),
+                                            expected_size = 0,
+                                            buffer = <<>>})
+            end;
+        _ ->
+            {ok, Replies, State#state{buffer = Data}}
     end.
 
 -spec terminate(term()) -> ok.
