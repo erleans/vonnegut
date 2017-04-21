@@ -91,6 +91,7 @@ init_per_testcase(_TestCase, Config) ->
     case wait_for_mgr() of
         ok ->
             application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
+            application:set_env(vonnegut, client_pool_size, 20),
             ok = vg_client_pool:start(),
             timer:sleep(3000),
             Config;
@@ -219,27 +220,39 @@ concurrent_fetch(_Config) ->
     end.
 
 
-%% to run this test: rebar3 ct --dir=cluster --sys_config=cluster/sys.config --suite=cluster_SUITE --case=concurrent_perf
-concurrent_perf(_Config) ->
+%% to run this test: rebar3 ct --dir=cluster --sys_config=cluster/sys.config --suite=cluster_SUITE --case=concurrent_write or _read
+concurrent_write(_Config) ->
     Topic1 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf1">>),
     Topic2 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf2">>),
     Topic3 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf3">>),
+    Topic4 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf4">>),
+    Topic5 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf5">>),
+    %%Topic6 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf6">>),
 
-    RandomRecords = [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
-                     crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
-                     crypto:strong_rand_bytes(60)],
-    RandomBigRecords = [crypto:strong_rand_bytes(6000), crypto:strong_rand_bytes(60000),
-                        crypto:strong_rand_bytes(600), crypto:strong_rand_bytes(600),
-                        crypto:strong_rand_bytes(6000)],
-    Scale = 1000,
-    LoadStart = erlang:monotonic_time(milli_seconds),
-    [vg_client:produce(Topic1, RandomRecords) || _ <- lists:seq(1, Scale)],
-    [vg_client:produce(Topic2, RandomRecords) || _ <- lists:seq(1, Scale)],
-    [vg_client:produce(Topic3, RandomBigRecords) || _ <- lists:seq(1, Scale)],
-
-    Pids = 12,
+    RandomRecords = [crypto:strong_rand_bytes(60)],%%  crypto:strong_rand_bytes(60),
+                     %% crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
+                     %% crypto:strong_rand_bytes(60)],
+    %% RandomBigRecords = [crypto:strong_rand_bytes(6000), crypto:strong_rand_bytes(6000),
+    %%                     crypto:strong_rand_bytes(600), crypto:strong_rand_bytes(600),
+    %%                     crypto:strong_rand_bytes(6000)],
+    Scale = 50000,
     Self = self(),
+
+    LoadStart = erlang:monotonic_time(milli_seconds),
+    spawn(fun() -> [vg_client:produce(Topic1, RandomRecords) || _ <- lists:seq(1, Scale)], Self ! hi end),
+    spawn(fun() -> [vg_client:produce(Topic2, RandomRecords) || _ <- lists:seq(1, Scale)], Self ! hi  end),
+    spawn(fun() -> [vg_client:produce(Topic3, RandomRecords) || _ <- lists:seq(1, Scale)], Self ! hi  end),
+    spawn(fun() -> [vg_client:produce(Topic4, RandomRecords) || _ <- lists:seq(1, Scale)], Self ! hi  end),
+    spawn(fun() -> [vg_client:produce(Topic5, RandomRecords) || _ <- lists:seq(1, Scale)], Self ! hi  end),
+    %% spawn(fun() -> [vg_client:produce(Topic6, RandomBigRecords) || _ <- lists:seq(1, Scale)] end),
+    [receive
+         hi -> ok
+     after
+         100000 -> throw(timeout)
+     end || _ <- lists:seq(1, 5)],
     LoadEnd = erlang:monotonic_time(milli_seconds),
+
+    Pids = 10,
     timer:sleep(2000),
     RetrieveStart = erlang:monotonic_time(milli_seconds),
     [begin
@@ -251,16 +264,88 @@ concurrent_perf(_Config) ->
                                      1 -> Topic2;
                                      2 -> Topic3
                                  end,
-                         %%[
-                         FetchStart = erlang:monotonic_time(milli_seconds),
-                         {ok, #{record_set := L}} = vg_client:fetch(Topic, 0, 60000),
-                         FetchEnd = erlang:monotonic_time(milli_seconds),
-                         ?assertEqual(Scale * length(RandomRecords), length(L)),
-                         %%?assertEqual(500, length(L)),
-                         %%|| _ <- lists:seq(0, 10)],
-                         Self ! done,
-                         io:fwrite(standard_error, "thread ~p fetch on topic ~p completed in ~p ms~n",
-                                   [ID, Topic, FetchEnd - FetchStart])
+                         [begin
+                              FetchStart = erlang:monotonic_time(milli_seconds),
+                              {ok, #{record_set := _L}} = vg_client:fetch(Topic, 9000, 60000),
+                              FetchEnd = erlang:monotonic_time(milli_seconds),
+                              %% ?assertEqual(Scale * length(RandomRecords), length(L)),
+                              io:fwrite(standard_error, "thread ~p fetch ~p on topic ~p completed in ~p ms~n",
+                                        [ID, R, Topic, FetchEnd - FetchStart])
+                          end
+                          || R <- lists:seq(0, 2)],
+                         Self ! done
+                     catch
+                         C:T ->
+                             ct:pal("~p ~p ~p", [C, T, erlang:get_stacktrace()]),
+                             Self ! fail
+                     end
+             end,
+         spawn(fun() -> F(N) end)
+     end || N <- lists:seq(0,  Pids)],
+
+    [receive
+         done -> ok;
+         fail -> throw(fail)
+     after
+         1000000 -> throw(timeout)
+     end || _ <- lists:seq(0, Pids)],
+    RetrieveEnd = erlang:monotonic_time(milli_seconds),
+    LoadDiff = LoadEnd - LoadStart,
+    RetDiff = RetrieveEnd - RetrieveStart,
+    io:fwrite(standard_error, "load ~p ret ~p ~n ~n", [LoadDiff, RetDiff]),
+    %%throw(gimmelogs),
+    ok.
+
+concurrent_read(_Config) ->
+    Topic1 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf1">>),
+    Topic2 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf2">>),
+    Topic3 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf3">>),
+    Topic4 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf4">>),
+
+    RandomRecords = [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
+                     crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
+                     crypto:strong_rand_bytes(60)],
+    RandomBigRecords = [crypto:strong_rand_bytes(6000), crypto:strong_rand_bytes(6000),
+                        crypto:strong_rand_bytes(600), crypto:strong_rand_bytes(600),
+                        crypto:strong_rand_bytes(6000)],
+    Scale = 10000,
+    Self = self(),
+
+    LoadStart = erlang:monotonic_time(milli_seconds),
+    spawn(fun() -> [vg_client:produce(Topic1, RandomRecords) || _ <- lists:seq(1, Scale)], Self ! hi end),
+    spawn(fun() -> [vg_client:produce(Topic2, RandomRecords) || _ <- lists:seq(1, Scale)], Self ! hi  end),
+    spawn(fun() -> [vg_client:produce(Topic3, RandomRecords) || _ <- lists:seq(1, Scale)], Self ! hi  end),
+    spawn(fun() -> [vg_client:produce(Topic4, RandomBigRecords) || _ <- lists:seq(1, Scale)], Self ! hi  end),
+    [receive
+         hi -> ok
+     after
+         100000 -> throw(timeout)
+     end || _ <- lists:seq(1, 4)],
+    LoadEnd = erlang:monotonic_time(milli_seconds),
+
+    Pids = 20,
+    timer:sleep(2000),
+    RetrieveStart = erlang:monotonic_time(milli_seconds),
+    [begin
+         F = fun(ID) ->
+                     %%timer:sleep(50),
+                     try
+                         Topic = case ID rem 4 of
+                                     0 -> Topic1;
+                                     1 -> Topic2;
+                                     2 -> Topic3;
+                                     3 -> Topic4
+                                 end,
+                         [begin
+                              FetchStart = erlang:monotonic_time(milli_seconds),
+                              {ok, #{record_set := L}} = vg_client:fetch(Topic, 0, 60000),
+                              FetchEnd = erlang:monotonic_time(milli_seconds),
+                              ?assertEqual(Scale * length(RandomRecords), length(L)),
+                              io:fwrite(standard_error, "thread ~p fetch ~p on topic ~p completed in ~p ms~n",
+                                        [ID, R, Topic, FetchEnd - FetchStart])
+                          end
+                          || R <- lists:seq(0, 5)],
+                         Self ! done
                      catch
                          C:T ->
                              ct:pal("~p ~p ~p", [C, T, erlang:get_stacktrace()]),
