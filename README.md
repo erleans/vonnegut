@@ -1,9 +1,9 @@
 vonnegut
 =====
 
-[![CircleCI](https://circleci.com/gh/GOFactory/vonnegut.svg?style=svg)](https://circleci.com/gh/GOFactory/vonnegut)
+[![CircleCI](https://circleci.com/gh/SpaceTime-IoT/vonnegut.svg?style=svg)](https://circleci.com/gh/SpaceTime-IoT/vonnegut)
 
-[![Coverage Status](https://coveralls.io/repos/github/GOFactory/vonnegut/badge.svg?branch=master)](https://coveralls.io/github/GOFactory/vonnegut?branch=master)
+[![Coverage Status](https://coveralls.io/repos/github/SpaceTime-IoT/vonnegut/badge.svg?branch=master)](https://coveralls.io/github/SpaceTime-IoT/vonnegut?branch=master)
 
 Build
 -----
