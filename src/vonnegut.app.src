@@ -15,9 +15,11 @@
    ]},
   {env,[{log_dirs, ["./data"]},
         {acceptor_pool_size, 10},
-        {client_pool_size, 10},
+        {client_pool_size, 5},
 
         {send_buffer_bytes, 102400},
+
+        {transport, partisan},
 
         %% Log and index file related configs
         {segment_bytes, 1073741824},

@@ -31,7 +31,8 @@
                 topic       :: binary(),
                 partition   :: integer(),
                 history_tab :: atom(),
-                config      :: #config{}
+                config      :: #config{},
+                transport   :: partisan | disterl
                }).
 
 -define(NEW_SERVER(Topic, Partition), binary_to_atom(<<Topic/binary, $-, Partition>>, latin1)).
@@ -81,6 +82,8 @@ init([Topic, Partition, NextNode, Tab]) ->
     TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
     filelib:ensure_dir(filename:join(TopicDir, "ensure")),
 
+    Transport = application:get_env(vonnegut, transport, partisan),
+
     {Id, LatestIndex, LatestLog} = vg_log_segments:find_latest_id(TopicDir, Topic, Partition),
     LastLogId = filename:basename(LatestLog, ".log"),
     {ok, LogFD} = vg_utils:open_append(LatestLog),
@@ -102,12 +105,14 @@ init([Topic, Partition, NextNode, Tab]) ->
                 topic=Topic,
                 partition=Partition,
                 config=Config,
+                transport = Transport,
                 history_tab=Tab
                }}.
 
 handle_call({write, RecordSet}, _From, State=#state{id=Id,
                                                     topic=Topic,
                                                     partition=Partition,
+                                                    transport=Transport,
                                                     next_brick=NextBrick}) ->
     State1 = write_record_set(RecordSet, State),
     case NextBrick of
@@ -115,7 +120,7 @@ handle_call({write, RecordSet}, _From, State=#state{id=Id,
         {_, tail} -> ok;
         {_, last} -> ok;
         _ ->
-            gen_server:cast(NextBrick, {write, self(), RecordSet})
+            vg_utils:cast(Transport, NextBrick, {write, self(), RecordSet})
     end,
     LatestId = State1#state.id,
     %% Should we do this in ack instead if it isn't solo or tail?
@@ -127,6 +132,7 @@ handle_call(_Msg, _From, State) ->
 
 handle_cast({write, Sender, RecordSet}, State=#state{topic=Topic,
                                                      partition=Partition,
+                                                     transport=Transport,
                                                      next_brick=NextBrick}) ->
     State1 = write_record_set(RecordSet, State),
     case NextBrick of
@@ -134,14 +140,14 @@ handle_cast({write, Sender, RecordSet}, State=#state{topic=Topic,
         {_, tail} -> ok;
         {_, last} -> ok;
         _ ->
-            gen_server:cast(NextBrick, {write, self(), RecordSet})
+            vg_utils:cast(Transport, NextBrick, {write, self(), RecordSet})
     end,
 
     LatestId = State1#state.id,
     %% Should we do this in ack instead if it isn't solo or tail?
     vg_topics:update_hwm(Topic, Partition, LatestId-1),
     %% TODO: batch acks
-    Sender ! {ack, LatestId},
+    vg_utils:send(Transport, Sender, {ack, LatestId}),
 
     {noreply, State1};
 handle_cast(_Msg, State) ->

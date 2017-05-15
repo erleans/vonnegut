@@ -10,6 +10,10 @@
 
          topics_on_disk/0,
 
+         call/3,
+         cast/3,
+         send/3,
+
          to_atom/1,
          to_integer/1]).
 
@@ -61,6 +65,34 @@ open_append(Filename) ->
 
 open_read(Filename) ->
     file:open(Filename, [read, raw, binary]).
+
+send(Transport, Target, Message) ->
+    case Transport of
+        partisan ->
+            RemoteNode = erlang:node(Target),
+            PeerServiceManager = vg_peer_service:manager(),
+            PeerServiceManager:forward_send(RemoteNode, Target, Message);
+        disterl ->
+            erlang:send(Target, Message)
+    end.
+
+call(Transport, {Target, Node}, Message) ->
+    case Transport of
+        partisan ->
+            PeerServiceManager = vg_peer_service:manager(),
+            PeerServiceManager:forward_call(Node, Target, Message);
+        disterl ->
+            gen_server:call({Target, Node}, Message)
+    end.
+
+cast(Transport, {Target, Node}, Message) ->
+    case Transport of
+        partisan ->
+            PeerServiceManager = vg_peer_service:manager(),
+            PeerServiceManager:forward_message(Node, Target, Message);
+        disterl ->
+            gen_server:cast({Target, Node}, Message)
+    end.
 
 to_integer(I) when is_integer(I) -> I;
 to_integer(I) when is_list(I)    -> list_to_integer(I);
