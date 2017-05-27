@@ -112,6 +112,10 @@ find_in_log(Log, Id, Position) ->
     {ok, _} = file:position(Log, Position),
     find_in_log(Log, Id, Position, file:read(Log, 12)).
 
+find_in_log(Log, Id, _Position, {ok, <<FileId:64/signed, _Size:32/signed>>}) when FileId > Id ->
+    %% we'll never succeed if this is the case, start scan over.
+    file:position(Log, 0),
+    find_in_log(Log, Id, 0, file:read(Log, 12));
 find_in_log(_Log, Id, Position, {ok, <<Id:64/signed, _Size:32/signed>>}) ->
     Position;
 find_in_log(Log, Id, Position, {ok, <<_:64/signed, Size:32/signed>>}) ->
