@@ -21,12 +21,21 @@ find_in_index(Fd, BaseOffset, Id) ->
 %% and could (in memory or not) use a binary search
 find_in_index_(_, _, _, <<>>) ->
     0;
+%% special case for when below the first offset in a single entry index
+find_in_index_(_, Id, BaseOffset, <<Offset:24/signed, _:24/signed>>)
+  when BaseOffset + Offset > Id->
+    0;
 find_in_index_(_, _, _, <<_:24/signed, Position:24/signed>>) ->
     Position;
 find_in_index_(_, Id, BaseOffset, <<Offset:24/signed, Position:24/signed, _/binary>>)
   when Id =:= BaseOffset + Offset ->
     Position;
-find_in_index_(_, Id, BaseOffset, <<_:24/signed, Position:24/signed, Offset:24/signed, _:24/signed, _/binary>>)
+%% special case for below the first offset in a multi-entry index, but
+%% I worry that it might be overly broad.
+find_in_index_(_, Id, BaseOffset, <<Offset:24/signed, _:24/signed, _:24/signed, _:24/signed, _/binary>>)
+  when BaseOffset + Offset > Id ->
+    0;
+find_in_index_(_, Id, BaseOffset, <<Offset:24/signed, Position:24/signed, Offset:24/signed, _:24/signed, _/binary>>)
   when BaseOffset + Offset > Id ->
     Position;
 find_in_index_(Fd, Id, BaseOffset, <<_:24/signed, _:24/signed, Rest/binary>>) ->
