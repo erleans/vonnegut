@@ -35,7 +35,7 @@ find_in_index_(_, Id, BaseOffset, <<Offset:24/signed, Position:24/signed, _/bina
 find_in_index_(_, Id, BaseOffset, <<Offset:24/signed, _:24/signed, _:24/signed, _:24/signed, _/binary>>)
   when BaseOffset + Offset > Id ->
     0;
-find_in_index_(_, Id, BaseOffset, <<Offset:24/signed, Position:24/signed, Offset:24/signed, _:24/signed, _/binary>>)
+find_in_index_(_, Id, BaseOffset, <<_:24/signed, Position:24/signed, Offset:24/signed, _:24/signed, _/binary>>)
   when BaseOffset + Offset > Id ->
     Position;
 find_in_index_(Fd, Id, BaseOffset, <<_:24/signed, _:24/signed, Rest/binary>>) ->
