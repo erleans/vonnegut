@@ -5,7 +5,7 @@
 -compile(export_all).
 
 all() ->
-    [creation, write, index_bug, limit].
+    [creation, write, index_bug, limit, many].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -96,6 +96,7 @@ index_bug(Config) ->
     ?assertEqual(199, HWM4),
     ?assertEqual(190, length(Reply4)).
 
+
 limit(Config) ->
     Topic = ?config(topic, Config),
 
@@ -111,3 +112,21 @@ limit(Config) ->
     {ok, #{record_set := []}} = vg_client:fetch(Topic, 0, #{max_bytes => 1}),
 
     ok.
+
+many(Config) ->
+    TopicCount = 1000,
+    TimeLimit = 10000,
+
+    Start = erlang:monotonic_time(milli_seconds),
+    [begin
+         timer:sleep(100),
+         N = integer_to_binary(N0),
+         Topic = vg_test_utils:create_random_name(<<"many-topic-", N/binary>>),
+         %% adding a record to the topic will create it under current settings
+         ct:pal("adding to topic: ~p", [Topic]),
+         {ok, _}  = vg_client:produce(Topic, [<<"woo">>])
+     end || N0 <- lists:seq(1, TopicCount)],
+    Duration = erlang:monotonic_time(milli_seconds) - Start,
+    ct:pal("creating ~p topics took ~p ms", [TopicCount, Duration]),
+    ?assert(Duration < TimeLimit),
+    Config.
