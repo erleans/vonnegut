@@ -2,8 +2,9 @@
 
 %%-behavior(shackle_client). ?
 
--export([metadata/0,
-         ensure_topic/1,
+-export([metadata/0, metadata/1,
+         ensure_topic/2,
+         topics/0, topics/2,
          fetch/1, fetch/2, fetch/3,
          produce/2,
          init/0,
@@ -26,14 +27,18 @@
 -spec metadata() -> {ok, {Chains :: vg_cluster_mgr:chains_map(),
                           Topics :: vg_cluster_mgr:topics_map()}}.
 metadata() ->
-    shackle:call(metadata, {metadata, []}).
+    %% this is maybe a silly default, considering that it could return
+    %% millions of topics
+    metadata([]).
 
--spec ensure_topic(Topic :: vg:topic()) -> {ok, {Chains :: vg_cluster_mgr:chains_map(),
-                                                 Topics :: vg_cluster_mgr:topics_map()}}.
-ensure_topic(Topic) ->
-    Result = shackle:call(metadata, {metadata, [Topic]}, ?TIMEOUT),
-    vg_client_pool:refresh_topic_map(),
-    Result.
+metadata(Topics) ->
+    shackle:call(metadata, {metadata, Topics}).
+
+-spec ensure_topic(Pool :: atom(), Topic :: vg:topic()) ->
+                          {ok, {Chains :: vg_cluster_mgr:chains_map(),
+                                Topics :: vg_cluster_mgr:topics_map()}}.
+ensure_topic(Pool, Topic) ->
+    shackle:call(Pool, {metadata, [Topic]}, ?TIMEOUT).
 
 -spec fetch(Topic)
            -> {ok, #{high_water_mark := integer(),
@@ -76,6 +81,17 @@ produce(Topic, RecordSet) ->
             {ok, Offset};
         {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
             {error, ErrorCode};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+topics() ->
+    topics(metadata, []).
+
+topics(Pool, Topic) ->
+    case shackle:call(Pool,  {topics, Topic}, ?TIMEOUT) of
+        {ok, {_, _}} = OK ->
+            OK;
         {error, Reason} ->
             {error, Reason}
     end.
@@ -127,12 +143,16 @@ handle_request({produce, TopicRecords}, #state {
     {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?PRODUCE_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
-handle_request(topics, #state {
-                          request_counter = RequestCounter,
-                          corids = CorIds
-                         } = State) ->
+handle_request({topics, Topics}, #state {
+                 request_counter = RequestCounter,
+                 corids = CorIds
+                } = State) ->
+
     RequestId = request_id(RequestCounter),
-    Data = vg_protocol:encode_request(?TOPICS_REQUEST, RequestId, ?CLIENT_ID, <<>>),
+    Request = vg_protocol:encode_array([<<(byte_size(T)):16/signed-integer,
+                                          T/binary>> || T <- Topics]),
+    Data = vg_protocol:encode_request(?TOPICS_REQUEST, RequestId, ?CLIENT_ID, Request),
+
     {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?TOPICS_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}}.

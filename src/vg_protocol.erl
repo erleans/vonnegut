@@ -5,6 +5,7 @@
          encode_request/4,
          encode_metadata_response/2,
          encode_metadata_request/1,
+         encode_chains/1,
 
          encode_array/1,
          encode_log/2,
@@ -17,6 +18,7 @@
          decode_record_set/1,
 
          decode_metadata_request/1,
+         decode_string/1,
 
          decode_produce_request/1,
          decode_fetch_response/1,
@@ -59,7 +61,24 @@ encode_request(ApiKey, CorrelationId, ClientId, Request) ->
 encode_metadata_request(Topics) ->
     encode_array([encode_string(Topic) || Topic <- Topics]).
 
+encode_chains(Chains) ->
+    encode_array([<<HeadPort:16/unsigned-integer,
+                    TailPort:16/unsigned-integer,
+                    (iolist_to_binary(
+                       encode_array([encode_string(to_binary(Name)),
+                                     encode_string(HeadHost),
+                                     encode_string(TailHost)])))/binary>>
+                      || #chain{name = Name,
+                                nodes = _Nodes,
+                                head = {HeadHost, HeadPort},
+                                tail = {TailHost, TailPort}} <- Chains]).
+
 %% generic encode functions
+
+to_binary(Bin) when is_binary(Bin) ->
+    Bin;
+to_binary(Atm) when is_atom(Atm) ->
+    atom_to_binary(Atm, utf8).
 
 encode_string(undefined) ->
     <<-1:16/signed-integer>>;
@@ -166,6 +185,9 @@ decode_array(DecodeFun, N, Rest, Acc) ->
 decode_int32(<<I:32/signed-integer, Rest/binary>>) ->
     {I, Rest}.
 
+decode_string(<<Size:16/signed-integer, String:Size/bytes, Rest/binary>>) ->
+    {String, Rest}.
+
 decode_record_set(<<>>) ->
     [];
 decode_record_set(<<_:64/signed-integer, Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
@@ -181,6 +203,9 @@ decode_record(<<CRC:32/unsigned-integer, Record/binary>>) ->
 decode_metadata_request(Msg) ->
     {Topics, _rest} = decode_array(fun decode_topics/1, Msg),
     Topics.
+
+decode_topics(<<Size:16/signed-integer, Topic:Size/bytes, Rest/binary>>) ->
+    {Topic, Rest}.
 
 decode_produce_request(<<Acks:16/signed-integer, Timeout:32/signed-integer, Topics/binary>>) ->
     {TopicsDecode, _} = decode_array(fun decode_produce_topics_request/1, Topics),
@@ -270,12 +295,18 @@ decode_produce_response_partitions(<<Partition:32/signed-integer, ErrorCode:16/s
     {{Partition, #{error_code => ErrorCode,
                    offset => Offset}}, Rest}.
 
-decode_topics_response(Msg) ->
-    {Topics, _Rest} = decode_array(fun decode_topics/1, Msg),
-    Topics.
+decode_topics_response(<<TopicsCount:32/signed-integer, Msg/binary>>) ->
+    {Chains, _Rest} = decode_array(fun decode_chain/1, Msg),
+    {TopicsCount, Chains}.
 
-decode_topics(<<Size:16/signed-integer, Topic:Size/bytes, Rest/binary>>) ->
-    {Topic, Rest}.
+decode_chain(<<HeadPort:16/unsigned-integer,
+               TailPort:16/unsigned-integer,
+               Array/binary>>) ->
+    {[Name, HeadHost, TailHost], Rest} = decode_array(fun decode_string/1, Array),
+    {#{name => Name,
+       head => {HeadHost, HeadPort},
+       tail => {TailHost, TailPort}},
+     Rest}.
 
 decode_fetch_response(Msg) ->
     case decode_array(fun decode_fetch_topic/1, Msg) of

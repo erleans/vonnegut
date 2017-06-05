@@ -119,7 +119,6 @@ many(Config) ->
 
     Start = erlang:monotonic_time(milli_seconds),
     [begin
-         timer:sleep(100),
          N = integer_to_binary(N0),
          Topic = vg_test_utils:create_random_name(<<"many-topic-", N/binary>>),
          %% adding a record to the topic will create it under current settings

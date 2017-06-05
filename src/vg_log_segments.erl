@@ -4,6 +4,7 @@
 -export([init_table/0,
          load_all/2,
          insert/3,
+         local/2,
          find_log_segment/3,
          find_active_segment/2,
          find_segment_offset/3,
@@ -37,6 +38,14 @@ load_all(Topic, Partition) ->
 
 insert(Topic, Partition, SegmentId) ->
     ets:insert(?SEGMENTS_TABLE, {Topic, Partition, SegmentId}).
+
+local(Topic, Partition) ->
+    case ets:select(?SEGMENTS_TABLE, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
+                                       ?LOG_SEGMENT_GUARD(0),
+                                       ?LOG_SEGMENT_RETURN}]) of
+        [] -> false;
+        _ -> true
+    end.
 
 -spec find_log_segment(Topic, Partition, RecordId) -> integer() when
       Topic     :: binary(),

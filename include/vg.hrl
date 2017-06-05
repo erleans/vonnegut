@@ -30,7 +30,7 @@
 -define(topic_map, topic_map).
 
 -record(chain, {
-          name  :: binary(),
+          name  :: binary() | atom(),
           nodes :: [atom()] | undefined,
           head  :: {inet:ip_address() | inet:hostname(), inet:port_number()},
           tail  :: {inet:ip_address() | inet:hostname(), inet:port_number()}

@@ -205,10 +205,24 @@ handle_request(?PRODUCE_REQUEST, _, Data, CorrelationId, Socket) ->
     Size = erlang:iolist_size(ProduceResponse) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ProduceResponse]),
     {error, request_disallowed};
-handle_request(?TOPICS_REQUEST, _Role, <<>>, CorrelationId, Socket) ->
-    Children = vg_topics:all(),
-    Topics = [vg_protocol:encode_string(T) || T <- Children],
-    Response = vg_protocol:encode_array(Topics),
+handle_request(?TOPICS_REQUEST, _Role, Data, CorrelationId, Socket) ->
+    lager:info("at=topics_request"),
+    {FilterTopics, <<>>} = vg_protocol:decode_array(fun vg_protocol:decode_string/1, Data),
+    TopicsCount =
+        case FilterTopics of
+            [] ->
+                length(vg_topics:all());
+            _ ->
+                %% count the number of sent topics that exist, usually just 1
+                lists:sum([case vg_log_segments:local(T, 0) of
+                               true -> 1;
+                               _ -> 0
+                           end
+                           || T <- FilterTopics])
+        end,
+    {_, Chains0, _} = vg_cluster_mgr:get_map(),
+    {_, Chains} = lists:unzip(maps:to_list(Chains0)),
+    Response = [<<TopicsCount:32/signed-integer>>, vg_protocol:encode_chains(Chains)],
     Size = erlang:iolist_size(Response) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, Response]).
 
