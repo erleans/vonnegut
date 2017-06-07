@@ -174,7 +174,7 @@ decode_array(DecodeFun, <<Length:32/signed-integer, Rest/binary>>) ->
     decode_array(DecodeFun, Length, Rest, []).
 
 decode_array(_, 0, Rest, Acc) ->
-    {Acc, Rest};
+    {lists:reverse(Acc), Rest};
 decode_array(DecodeFun, N, Rest, Acc) ->
     case DecodeFun(Rest) of
         {Element, Rest1} ->
