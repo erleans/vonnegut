@@ -108,4 +108,6 @@ limit(Config) ->
     {ok, #{record_set := Reply2}} = vg_client:fetch(Topic, 0, #{max_bytes => 1000}),
     ?assertEqual(24, length(Reply2)),
 
+    {ok, #{record_set := []}} = vg_client:fetch(Topic, 0, #{max_bytes => 1}),
+
     ok.

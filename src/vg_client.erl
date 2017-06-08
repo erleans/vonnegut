@@ -46,10 +46,8 @@ fetch(Topic) when is_binary(Topic) ->
     fetch(Topic, 0).
 
 fetch(Topic, Position) ->
-    fetch(Topic, Position, ?TIMEOUT).
+    fetch(Topic, Position, #{}).
 
-fetch(Topic, Position, Timeout) when is_integer(Timeout) ->
-    fetch(Topic, Position, #{timeout => Timeout});
 fetch(Topic, Position, Opts) ->
     Timeout = maps:get(timeout, Opts, ?TIMEOUT),
     MaxBytes = maps:get(max_bytes, Opts, 0),
