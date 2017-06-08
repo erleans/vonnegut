@@ -74,6 +74,7 @@ get_pool(Topic, RW) ->
                             Chain = choose_random_chain(),
                             Pool = make_pool_name(Chain, RW),
                             vg_client:ensure_topic(Pool, Topic),
+                            ets:insert(?topic_map, {Topic, Chain}),
                             {ok, Pool};
                         _ ->
                             lager:error("failed finding existing chain and"
