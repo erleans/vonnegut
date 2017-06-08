@@ -46,12 +46,14 @@ fetch(Topic) when is_binary(Topic) ->
     fetch(Topic, 0).
 
 fetch(Topic, Position) ->
-    fetch(Topic, Position, ?TIMEOUT).
+    fetch(Topic, Position, #{}).
 
-fetch(Topic, Position, Timeout) ->
+fetch(Topic, Position, Opts) ->
+    Timeout = maps:get(timeout, Opts, ?TIMEOUT),
+    MaxBytes = maps:get(max_bytes, Opts, 0),
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, 100}]}]}, Timeout) of
+    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, MaxBytes}]}]}, Timeout) of
         {ok, #{Topic := #{0 := Result=#{error_code := 0}}}} ->
             {ok, Result};
         {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->

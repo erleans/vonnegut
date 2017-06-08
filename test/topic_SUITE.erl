@@ -5,7 +5,7 @@
 -compile(export_all).
 
 all() ->
-    [creation, write, index_bug].
+    [creation, write, index_bug, limit].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -95,3 +95,19 @@ index_bug(Config) ->
 
     ?assertEqual(199, HWM4),
     ?assertEqual(190, length(Reply4)).
+
+limit(Config) ->
+    Topic = ?config(topic, Config),
+
+    {ok, _}  = vg_client:produce(Topic,
+                                 lists:duplicate(100, <<"123456789abcdef">>)),
+
+    {ok, #{record_set := Reply}} = vg_client:fetch(Topic, 0),
+    ?assertEqual(100, length(Reply)),
+
+    {ok, #{record_set := Reply2}} = vg_client:fetch(Topic, 0, #{max_bytes => 1000}),
+    ?assertEqual(24, length(Reply2)),
+
+    {ok, #{record_set := []}} = vg_client:fetch(Topic, 0, #{max_bytes => 1}),
+
+    ok.

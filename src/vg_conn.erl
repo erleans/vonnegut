@@ -150,7 +150,7 @@ handle_request(?METADATA_REQUEST, _, Data, CorrelationId, Socket) ->
 handle_request(?FETCH_REQUEST, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/signed-integer,
                                        _MinBytes:32/signed-integer, Rest/binary>>,
                CorrelationId, Socket) when Role =:= tail orelse Role =:= solo ->
-    {[{Topic, [{Partition, Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
+    {[{Topic, [{Partition, Offset, MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
     {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
 
     lager:info("at=fetch_request topic=~s partition=~p offset=~p segment_id=~p position=~p",
@@ -159,7 +159,12 @@ handle_request(?FETCH_REQUEST, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTim
     File = vg_utils:log_file(Topic, Partition, SegmentId),
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
-        Bytes = filelib:file_size(File) - Position,
+        SendBytes = filelib:file_size(File) - Position,
+        Bytes =
+            case MaxBytes of
+                0 -> SendBytes;
+                _ -> min(SendBytes, MaxBytes)
+            end,
         ErrorCode = 0,
         HighWaterMark = vg_topics:lookup_hwm(Topic, Partition),
         Response = vg_protocol:encode_fetch_response(Topic, Partition, ErrorCode, HighWaterMark, Bytes),

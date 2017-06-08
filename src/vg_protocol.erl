@@ -329,4 +329,7 @@ decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/
                     Value:ValueSize/binary, Rest/binary>>, Set) ->
     decode_record_set(Rest, [#{id => Id,
                                crc => Crc,
-                               record => {binary:copy(Key), binary:copy(Value)}} | Set]).
+                               record => {binary:copy(Key), binary:copy(Value)}} | Set]);
+decode_record_set(<<_/binary>>, Set) ->
+    %% ignore partial records
+    decode_record_set(<<>>, Set).
