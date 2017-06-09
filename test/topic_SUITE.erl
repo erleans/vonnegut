@@ -9,7 +9,6 @@ all() ->
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
-    lager:start(),
     %% clear env from other suites
     application:unload(vonnegut),
     application:load(vonnegut),
@@ -26,7 +25,7 @@ end_per_suite(Config) ->
     Config.
 
 init_per_testcase(_, Config) ->
-    ok = vg_client_pool:start(),
+    ok = vg_client_pool:start(#{reconnect => false}),
     Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
     vg:create_topic(Topic),
     [{topic, Topic} | Config].
