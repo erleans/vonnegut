@@ -3,7 +3,7 @@
 %%-behavior(shackle_client). ?
 
 -export([metadata/0, metadata/1,
-         ensure_topic/2,
+         ensure_topic/1,
          topics/0, topics/2,
          fetch/1, fetch/2, fetch/3,
          produce/2,
@@ -34,11 +34,13 @@ metadata() ->
 metadata(Topics) ->
     shackle:call(metadata, {metadata, Topics}).
 
--spec ensure_topic(Pool :: atom(), Topic :: vg:topic()) ->
+-spec ensure_topic(Topic :: vg:topic()) ->
                           {ok, {Chains :: vg_cluster_mgr:chains_map(),
-                                Topics :: vg_cluster_mgr:topics_map()}}.
-ensure_topic(Pool, Topic) ->
-    shackle:call(Pool, {metadata, [Topic]}, ?TIMEOUT).
+                                Topics :: vg_cluster_mgr:topics_map()}} |
+                          {error, Reason :: term()}.
+ensure_topic(Topic) ->
+    %% always use the metadata topic, creation happens inside via a global process.
+    shackle:call(metadata, {metadata, [Topic]}, ?TIMEOUT).
 
 -spec fetch(Topic)
            -> {ok, #{high_water_mark := integer(),
