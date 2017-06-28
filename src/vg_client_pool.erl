@@ -37,6 +37,7 @@ start() ->
 
 start_pools(Chains) ->
     [begin
+         Name = <<HeadHost/binary, "-", (integer_to_binary(HeadPort))/binary>>,
          lager:info("starting chain: ~p ~p", [Name, C]),
          HeadName = make_pool_name(Name, write),
          start_pool(HeadName, #{ip => binary_to_list(HeadHost),
@@ -46,11 +47,13 @@ start_pools(Chains) ->
                  <<"solo">> -> HeadHost;
                  _ -> TailHost0
              end,
+         %% the name of the pool can be misleading as to what host and
+         %% port it's on.  Do we need to fix this?
          TailName = make_pool_name(Name, read),
          start_pool(TailName, #{ip => binary_to_list(TailHost),
                                 port => TailPort})
      end
-     || #{name := Name,
+     || #{name := _Name,
           head := {HeadHost, HeadPort},
           tail := {TailHost0, TailPort}} = C  <- Chains].
 
@@ -65,47 +68,22 @@ get_pool(Topic, RW) ->
     %% list is being refreshed.
     case ets:lookup(?topic_map, Topic) of
         [] ->
-            case try_all_chains(Topic) of
-                {ok, Pool} ->
+            %% TODO: this creates a topic on a read, which isn't great
+            case vg_client:ensure_topic(Topic) of
+                {ok, {_Chains, #{Topic := Chain}}} ->
+                {ok, R} = vg_client:topics(),
+                    [{chains, _Chains2}] =  ets:lookup(?topic_map, chains),
+                    lager:info("chains ~p", [R]),
+                    ets:insert(?topic_map, {Topic, Chain}),
+                    Pool = make_pool_name(Chain, RW),
+                    lager:info("pool ~p chain ~p", [Pool, Chain]),
                     {ok, Pool};
-                {error, not_found} ->
-                    case RW of
-                        write ->
-                            Chain = choose_random_chain(),
-                            Pool = make_pool_name(Chain, RW),
-                            vg_client:ensure_topic(Pool, Topic),
-                            ets:insert(?topic_map, {Topic, Chain}),
-                            {ok, Pool};
-                        _ ->
-                            lager:error("failed finding existing chain and"
-                                        " creating new topic=~p", [Topic]),
-                            {error, not_found}
-                    end
+                {error, Reason} ->
+                    {error, Reason}
             end;
         [{_, Chain}] ->
             Pool = make_pool_name(Chain, RW),
             lager:debug("found chain for topic=~p on pool=~p", [Topic, Pool]),
-            {ok, Pool}
-    end.
-
-choose_random_chain() ->
-    [{_, Chains}] = ets:lookup(?topic_map, chains),
-    #{name := Name} = lists:nth(rand:uniform(length(Chains)), Chains),
-    Name.
-
-try_all_chains(Topic) ->
-    [{_, Chains}] = ets:lookup(?topic_map, chains),
-    try_all_chains(Topic, Chains).
-
-try_all_chains(_Topic, []) ->
-    {error, not_found};
-try_all_chains(Topic, [#{name := Name}|T]) ->
-    Pool = make_pool_name(Name, read),
-    case shackle:call(Pool, {topics, [Topic]}) of
-        {ok, {0, _}} ->
-            try_all_chains(Topic, T);
-        {ok, {1, _}} ->
-            ets:insert(?topic_map, {Topic, Name}),
             {ok, Pool}
     end.
 
