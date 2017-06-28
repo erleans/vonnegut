@@ -36,7 +36,8 @@ metadata(Topics) ->
 
 -spec ensure_topic(Topic :: vg:topic()) ->
                           {ok, {Chains :: vg_cluster_mgr:chains_map(),
-                                Topics :: vg_cluster_mgr:topics_map()}}.
+                                Topics :: vg_cluster_mgr:topics_map()}} |
+                          {error, Reason :: term()}.
 ensure_topic(Topic) ->
     %% always use the metadata topic, creation happens inside via a global process.
     shackle:call(metadata, {metadata, [Topic]}, ?TIMEOUT).
