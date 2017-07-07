@@ -13,3 +13,5 @@ ADD ./vonnegut.tar.gz /opt/vonnegut
 EXPOSE 8080 8080
 
 ENTRYPOINT ["/opt/vonnegut/bin/vonnegut"]
+
+CMD ["foreground"]
