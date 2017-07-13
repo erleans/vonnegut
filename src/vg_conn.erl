@@ -22,6 +22,7 @@
 
 -type topic_partition() :: {binary(), [partition()]}.
 -type partition() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
+-type limited_partition() :: {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 
 -record(state, {socket :: inets:socket(),
                 role   :: head | tail, %% middle disconnects
@@ -267,7 +268,7 @@ decode_topic2(<<Size:16/signed-integer, Topic:Size/binary, PartitionsRaw/binary>
     {Partitions, Rest} = vg_protocol:decode_array(fun decode_partition2/1, PartitionsRaw),
     {{Topic, Partitions}, Rest}.
 
--spec decode_partition2(binary()) -> {partition(), binary()}.
+-spec decode_partition2(binary()) -> {limited_partition(), binary()}.
 decode_partition2(<<Partition:32/signed-integer, FetchOffset:64/signed-integer,
                    MaxBytes:32/signed-integer, Index:32/signed-integer, Rest/binary>>) ->
     {{Partition, FetchOffset, MaxBytes, Index}, Rest}.
