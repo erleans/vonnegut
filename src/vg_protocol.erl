@@ -51,8 +51,13 @@ encode_topics(Topics) ->
     encode_array([[encode_string(Topic), encode_partitions(Partitions)] || {Topic, Partitions} <- Topics]).
 
 encode_partitions(Partitions) ->
-    encode_array([<<Partition:32/signed-integer, Offset:64/signed-integer, MaxBytes:32/signed-integer>>
-                     || {Partition, Offset, MaxBytes} <- Partitions]).
+    encode_array([case PartitionTuple of
+                      {Partition, Offset, MaxBytes} ->
+                          <<Partition:32/signed-integer, Offset:64/signed-integer, MaxBytes:32/signed-integer>>;
+                      {Partition, Offset, MaxBytes, MaxIndex} ->
+                          <<Partition:32/signed-integer, Offset:64/signed-integer,
+                            MaxBytes:32/signed-integer, MaxIndex:32/signed-integer>>
+                  end || PartitionTuple <- Partitions]).
 
 encode_request(ApiKey, CorrelationId, ClientId, Request) ->
     [<<ApiKey:16/signed-integer, ?API_VERSION:16/signed-integer, CorrelationId:32/signed-integer>>,

@@ -58,9 +58,16 @@ fetch(Topic, Position) ->
 fetch(Topic, Position, Opts) ->
     Timeout = maps:get(timeout, Opts, ?TIMEOUT),
     MaxBytes = maps:get(max_bytes, Opts, 0),
+    {Op, Args} =
+        case maps:get(max_index, Opts, undefined) of
+            undefined ->
+                {fetch, [{Topic, [{0, Position, MaxBytes}]}]};
+            MaxIndex ->
+                {fetch2, [{Topic, [{0, Position, MaxBytes, MaxIndex}]}]}
+        end,
     {ok, Pool} = vg_client_pool:get_pool(Topic, read),
     lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    case shackle:call(Pool, {fetch, [{Topic, [{0, Position, MaxBytes}]}]}, Timeout) of
+    case shackle:call(Pool, {Op, Args}, Timeout) of
         {ok, #{Topic := #{0 := Result=#{error_code := 0}}}} ->
             {ok, Result};
         {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
@@ -118,16 +125,17 @@ handle_request({metadata, Topics}, #state {
     {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?METADATA_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
-handle_request({fetch, TopicOffsets}, #state {
+handle_request({Fetch, TopicOffsets}, #state {
                  request_counter = RequestCounter,
                  corids = CorIds
-                } = State) ->
+                } = State) when Fetch == fetch orelse Fetch == fetch2 ->
     RequestId = request_id(RequestCounter),
     ReplicaId = -1,
     MaxWaitTime = 5000,
     MinBytes = 100,
+    ReqType = case Fetch of fetch -> ?FETCH_REQUEST; fetch2 -> ?FETCH2_REQUEST end,
     Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, TopicOffsets),
-    Data = vg_protocol:encode_request(?FETCH_REQUEST, RequestId, ?CLIENT_ID, Request),
+    Data = vg_protocol:encode_request(ReqType, RequestId, ?CLIENT_ID, Request),
     {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?FETCH_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
