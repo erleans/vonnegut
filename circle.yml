@@ -1,51 +1,121 @@
+defaults: &defaults
+  shell: /bin/bash
+  working_directory: /home/circleci/vonnegut
+  docker:
+    - image: tsloughter/erlang-alpine:20.0.1
+      cmd: ["/bin/bash"]
+
 version: 2
-executorType: docker
-containerInfo:
-  - image: tsloughter/erlang-git:19.2
-    cmd: ["/bin/bash"]
-stages:
+jobs:
   build:
-    workDir: ~/vonnegut
+    <<: *defaults
     steps:
-      - type: checkout
+      - checkout
 
-      - type: cache-restore
-        key: vonnegut-{{ .Branch }}-{{ checksum "rebar.lock" }}
+      - restore_cache:
+          keys:
+            - vonnegut-{{ checksum "rebar.lock" }}
+            - vonnegut-hex-packages
 
-      - type: cache-restore
-        key: erlang-plt-19.2
+      - run:
+          command: rebar3 compile
 
-      - type: cache-restore
-        key: hex-packages
+      - store_artifacts:
+          path: /home/circleci/vonnegut/rebar3.crashdump
+          destination: rebar3_crashdump.txt
+          when: on_fail
 
-      - type: shell
-        shell: /bin/bash
-        command: |
-            set -exu
+      - save-cache:
+          key: vonnegut-{{ checksum "rebar.lock" }}
+          paths:
+            - /home/circleci/vonnegut/_build/default/lib
+            - /home/circleci/vonnegut/_build/default/plugins
+            #- /home/circleci/vonnegut/_build/test/lib
+            #- /home/circleci/vonnegut/_build/test/plugins
 
-            rebar3 do dialyzer, xref, ct, cover
+      - save-cache:
+          key: vonnegut-hex-packages
+          paths:
+            - /root/.cache/rebar3/hex/default/packages
+
+  dialyzer:
+    <<: *defaults
+    steps:
+      - checkout
+
+      - attach_workspace:
+          at: /home/circleci/vonnegut
+
+      - restore_cache:
+          keys:
+            - erlang-plt-20.0.1
+
+      - restore_cache:
+          keys:
+            - vonnegut-{{ checksum "rebar.lock" }}
+            - vonnegut-hex-packages
+
+      - run:
+          command: rebar3 dialyzer
+
+      - save-cache:
+          key: erlang-plt-20.0.1
+          paths:
+            - /root/.cache/rebar3/rebar3_20.0.1_plt
+
+  xref:
+    <<: *defaults
+    steps:
+      - checkout
+
+      - attach_workspace:
+          at: /home/circleci/vonnegut
+
+      - restore_cache:
+          keys:
+            - vonnegut-{{ checksum "rebar.lock" }}
+            - vonnegut-hex-packages
+
+      - run:
+          command: rebar3 xref
+
+  tests:
+    <<: *defaults
+    steps:
+      - checkout
+
+      - attach_workspace:
+          at: /home/circleci/vonnegut
+
+      - restore_cache:
+          keys:
+            - vonnegut-{{ checksum "rebar.lock" }}
+            - vonnegut-hex-packages
+
+      - run:
+          command: |
+            rebar3 ct, cover
             rebar3 cluster # integrate with cover somehow?
             rebar3 coveralls send
 
-      - type: test-results-store
-        path: ~/vonnegut/_build/test/logs/
+      - store_test_results:
+          path: /home/circleci/vonnegut/_build/test/logs/
 
-      - type: artifacts-store
-        path: ~/vonnegut/_build/test/logs
-        destination: common_test
+      - store_artifacts:
+          path: /home/circleci/vonnegut/_build/test/logs
+          destination: common_test
 
-      - type: cache-save
-        key: vonnegut-{{ .Branch }}-{{ checksum "rebar.lock" }}
-        paths:
-          - ~/vonnegut/_build/default/lib
-          - ~/vonnegut/_build/default/plugins
-
-      - type: cache-save
-        key: erlang-plt-19.2
-        paths:
-          - ~/.cache/rebar3/rebar3_19.2_plt
-
-      - type: cache-save
-        key: hex-packages
-        paths:
-          - ~/.cache/rebar3/hex/default/packages
+workflows:
+  version: 2
+  build_and_test:
+    jobs:
+      - build
+      - dialyzer:
+          requires:
+            - build
+      - xref:
+          requires:
+            - build
+      - tests:
+          requires:
+            - build
