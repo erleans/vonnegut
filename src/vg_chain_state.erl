@@ -64,7 +64,7 @@ inactive(state_timeout, connect, Data=#data{name=Name,
                                             cluster_type=ClusterType}) ->
     {Members, AllNodes} = join(ClusterType),
     lager:info("cluster_type=~p members=~p all_nodes=~p", [ClusterType, Members, AllNodes]),
-    case role(node(), Members, ClusterType) of
+    case role(node(), Members, Replicas, ClusterType) of
         solo ->
             lager:info("at=chain_complete role=solo requested_size=1", []),
             lager:info("at=start_cluster_mgr role=solo"),
@@ -131,17 +131,19 @@ code_change(_, _OldState, Data, _) ->
 %% Internal functions
 
 %% assume we expect to find at least 1 node if using srv discovery
-role(_Node, [], {srv, _}) ->
-    undefined;
-role(Node, [Node], {srv, _}) ->
-    undefined;
-role(_Node, [], local) ->
+role(_Node, _, 1, _) ->
     solo;
-role(Node, [Node], local) ->
+role(_Node, [], _, {srv, _}) ->
+    undefined;
+role(Node, [Node], _, {srv, _}) ->
+    undefined;
+role(_Node, [], _, local) ->
     solo;
-role(Node, [Node | _], _) ->
+role(Node, [Node], _, local) ->
+    solo;
+role(Node, [Node | _], _, _) ->
     head;
-role(Node, Nodes, _) ->
+role(Node, Nodes, _, _) ->
     case lists:reverse(Nodes) of
         [Node | _] ->
             tail;
