@@ -132,7 +132,7 @@ code_change(_, _OldState, Data, _) ->
 
 %% assume we expect to find at least 1 node if using srv discovery
 role(_Node, _, 1, _) ->
-    head;
+    solo;
 role(_Node, [], _, {srv, _}) ->
     undefined;
 role(Node, [Node], _, {srv, _}) ->
