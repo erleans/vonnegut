@@ -1,6 +1,6 @@
 -module(vg_client_pool).
 
--export([start/0,
+-export([start/0, start/1,
          stop/0,
          get_pool/2,
          refresh_topic_map/0]).
@@ -14,6 +14,14 @@
 -define(OPTIONS, [set, public, named_table, {read_concurrency, true}]).
 
 start() ->
+    start(#{}).
+
+start(Opts) ->
+    start(Opts, 0).
+
+start(_Opts, 10) ->
+    {error, could_not_start_pools};
+start(Opts, N) ->
     %% maybe start this if it hasn't been
     application:ensure_all_started(shackle),
     case application:get_env(vonnegut, client) of
@@ -22,14 +30,22 @@ start() ->
                 undefined ->
                     lager:error("No endpoints configured for client");
                 [{Host, Port} | _] ->
-                    start_pool(metadata, #{ip => Host,
-                                           port => Port}),
-                    {ok, {_, Chains}} = vg_client:topics(),
-                    maybe_init_ets(),
-                    _ = start_pools(Chains),
-                    application:set_env(vonnegut, chains, Chains),
-                    refresh_topic_map(),
-                    ok
+                    start_pool(metadata, Opts#{ip => Host,
+                                               port => Port}),
+                    try
+                        case vg_client:topics() of
+                            {ok, {_, Chains}} ->
+                                maybe_init_ets(),
+                                _ = start_pools(Chains),
+                                application:set_env(vonnegut, chains, Chains),
+                                refresh_topic_map(),
+                                ok
+                        end
+                    catch _:_Reason ->
+                            lager:warning("at=start_pools error=~p", [_Reason]),
+                            timer:sleep(500),
+                            start(Opts, N + 1)
+                    end
             end;
         _ ->
             lager:info("No client configuration")
@@ -71,12 +87,8 @@ get_pool(Topic, RW) ->
             %% TODO: this creates a topic on a read, which isn't great
             case vg_client:ensure_topic(Topic) of
                 {ok, {_Chains, #{Topic := Chain}}} ->
-                {ok, R} = vg_client:topics(),
-                    [{chains, _Chains2}] =  ets:lookup(?topic_map, chains),
-                    lager:info("chains ~p", [R]),
                     ets:insert(?topic_map, {Topic, Chain}),
                     Pool = make_pool_name(Chain, RW),
-                    lager:info("pool ~p chain ~p", [Pool, Chain]),
                     {ok, Pool};
                 {error, Reason} ->
                     {error, Reason}
@@ -115,7 +127,7 @@ start_pool(Name, Opts) ->
     shackle_pool:start(Name, vg_client,
                        [{ip, maps:get(ip, Opts, "127.0.0.1")},
                         {port, maps:get(port, Opts, 5555)},
-                        {reconnect, true},
+                        {reconnect, maps:get(reconnect, Opts, true)},
                         {reconnect_time_max, 120000},
                         {reconnect_time_min, none},
                         {socket_options, SocketOpts}],
@@ -125,6 +137,7 @@ start_pool(Name, Opts) ->
 
 stop() ->
     [shackle_pool:stop(Pool)
-     || Pool <- application:get_env(vonnegut, client_pools, [])].
+     || Pool <- application:get_env(vonnegut, client_pools, [])],
+    application:stop(shackle).
 
 %%%%%%%%%%%%%%%%%%

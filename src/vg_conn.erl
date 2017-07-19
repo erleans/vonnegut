@@ -35,7 +35,7 @@ acceptor_init(_SockName, LSocket, []) ->
     {ok, MRef}.
 
 acceptor_continue(_PeerName, Socket, MRef) ->
-    lager:info("new connection on ~p", [Socket]),
+    lager:debug("new connection on ~p", [Socket]),
     case vg_chain_state:role() of
         middle ->
             lager:debug("at=new_connection error=client_middle node=~p peer=~p",

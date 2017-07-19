@@ -35,7 +35,7 @@ from_zero(_Config) ->
     %% listeners to come up
     timer:sleep(250),
 
-    ok = vg_client_pool:start(),
+    ok = vg_client_pool:start(#{reconnect => false}),
     ?assertMatch({ok, 0},
                  vg_client:produce(Topic, [{<<"key">>, <<"record 1 wasn't long enough to make wrapping fail">>},
                                            <<"record 2">>])),
