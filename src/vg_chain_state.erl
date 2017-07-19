@@ -68,7 +68,10 @@ inactive(state_timeout, connect, Data=#data{name=Name,
         solo ->
             lager:info("at=chain_complete role=solo requested_size=1", []),
             lager:info("at=start_cluster_mgr role=solo"),
-            vonnegut_sup:start_cluster_mgr(solo, []),
+            ClientPort = vg_config:port(),
+            PartisanPort = application:get_env(partisan, peer_port, 10200),
+            [N, H] = string:split(atom_to_list(node()), "@"),
+            vonnegut_sup:start_cluster_mgr(solo, [{list_to_atom(N), H, PartisanPort, ClientPort}]),
             {next_state, active, Data#data{members=Members,
                                            role=solo,
                                            all_nodes=[],
@@ -155,6 +158,10 @@ next_node(tail, _, _) ->
     tail;
 next_node(head, _, [_, Next | _]) ->
     Next;
+next_node(_, Node, []) ->
+    Node;
+next_node(_, _, [N]) ->
+    N;
 next_node(_, Node, Nodes) ->
     find_next(Node, Nodes).
 
