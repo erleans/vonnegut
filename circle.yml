@@ -94,7 +94,9 @@ jobs:
 
       - run:
           command: |
-            rebar3 ct, cover
+            set -exu
+
+            rebar3 do ct, cover
             rebar3 cluster # integrate with cover somehow?
             rebar3 coveralls send
 
