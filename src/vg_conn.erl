@@ -148,36 +148,47 @@ handle_request(?METADATA_REQUEST, _, Data, CorrelationId, Socket) ->
     Response = vg_protocol:encode_metadata_response(Nodes, TopicMetadata),
     Size = erlang:iolist_size(Response) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, Response]);
-handle_request(?FETCH_REQUEST, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/signed-integer,
-                                       _MinBytes:32/signed-integer, Rest/binary>>,
-               CorrelationId, Socket) when Role =:= tail orelse Role =:= solo ->
-    {[{Topic, [{Partition, Offset, MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
-    {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
-    do_fetch(Topic, Partition, Offset, SegmentId, Position, unlimited,
-             CorrelationId, Socket, MaxBytes);
-handle_request(?FETCH2_REQUEST, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/signed-integer,
-                                       _MinBytes:32/signed-integer, Rest/binary>>,
-               CorrelationId, Socket) when Role =:= tail orelse Role =:= solo ->
-    {[{Topic, [{Partition, Offset, MaxBytes, MaxIndex} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic2/1, Rest),
-    {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
-    {EndSegmentId, EndPosition} = vg_log_segments:find_segment_offset(Topic, Partition, MaxIndex + 1),
-    Fetch =
-        case SegmentId of
-            %% max on this segment, limit fetch
-            EndSegmentId ->
-                {limited, EndPosition - Position};
-            %% some higher segment, unlimited fetch
-            _ ->
-                unlimited
-        end,
-    do_fetch(Topic, Partition, Offset, SegmentId, Position, Fetch,
-             CorrelationId, Socket, MaxBytes);
-handle_request(Fetch, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
+handle_request(FetchType, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/signed-integer,
+                                  _MinBytes:32/signed-integer, Rest/binary>>,
+               CorrelationId, Socket) when (Role =:= tail orelse Role =:= solo) andalso
+                                           (FetchType =:= ?FETCH_REQUEST orelse
+                                            FetchType =:= ?FETCH2_REQUEST) ->
+    DecodeFn = case FetchType of
+                   ?FETCH_REQUEST -> fun decode_topic/1;
+                   ?FETCH2_REQUEST -> fun decode_topic2/1
+               end,
+    {TopicPartitions, _} = vg_protocol:decode_array(DecodeFn, Rest),
+    {Size, FetchResults}
+        = lists:foldl(fun({Topic, Partitions}, {SizeAcc, ResponseAcc}) ->
+                          {S, R} = fetch(Topic, Partitions),
+                          {S + SizeAcc, ResponseAcc ++ R}
+                      end, {4, [<<(length(TopicPartitions)):32/signed-integer>>]}, TopicPartitions),
+
+    gen_tcp:send(Socket, <<(Size+4):32/signed-integer, CorrelationId:32/signed-integer>>),
+    do_send(FetchResults, Socket);
+handle_request(?FETCH_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
                                      _MinBytes:32/signed, Rest/binary>>,
-               CorrelationId, Socket) when Fetch == ?FETCH_REQUEST orelse Fetch == ?FETCH2_REQUEST ->
+               CorrelationId, Socket) ->
     {[{Topic, [{Partition, _Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
     lager:info("at=fetch_request error=request_disallowed topic=~s partition=~p", [Topic, Partition]),
-    Response = vg_protocol:encode_fetch_response(Topic, Partition, ?FETCH_DISALLOWED_ERROR, 0, 0),
+    Response = vg_protocol:encode_array([[vg_protocol:encode_string(Topic),
+                                          vg_protocol:encode_array([vg_protocol:encode_fetch_topic_response(Partition,
+                                                                                                            ?FETCH_DISALLOWED_ERROR,
+                                                                                                            0,
+                                                                                                            0)])]]),
+    Size = erlang:iolist_size(Response) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]),
+    {error, request_disallowed};
+handle_request(?FETCH2_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
+                                     _MinBytes:32/signed, Rest/binary>>,
+               CorrelationId, Socket) ->
+    {[{Topic, [{Partition, _Offset, _MaxBytes, _MaxIndex} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic2/1, Rest),
+    lager:info("at=fetch2_request error=request_disallowed topic=~s partition=~p", [Topic, Partition]),
+    Response = vg_protocol:encode_array([[vg_protocol:encode_string(Topic),
+                                          vg_protocol:encode_array([vg_protocol:encode_fetch_topic_response(Partition,
+                                                                                                            ?FETCH_DISALLOWED_ERROR,
+                                                                                                            0,
+                                                                                                            0)])]]),
     Size = erlang:iolist_size(Response) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]),
     {error, request_disallowed};
@@ -222,38 +233,6 @@ handle_request(?TOPICS_REQUEST, _Role, Data, CorrelationId, Socket) ->
     Size = erlang:iolist_size(Response) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, Response]).
 
-do_fetch(Topic, Partition, Offset, SegmentId, Position, Fetch,
-         CorrelationId, Socket, MaxBytes) ->
-    lager:info("at=fetch_request topic=~s partition=~p offset=~p segment_id=~p position=~p",
-              [Topic, Partition, Offset, SegmentId, Position]),
-
-    File = vg_utils:log_file(Topic, Partition, SegmentId),
-    {ok, Fd} = file:open(File, [read, binary, raw]),
-    try
-        SendBytes =
-            case Fetch of
-                unlimited ->
-                    filelib:file_size(File) - Position;
-                {limited, Limit} ->
-                    Limit
-            end,
-        Bytes =
-            case MaxBytes of
-                0 -> SendBytes;
-                _ -> min(SendBytes, MaxBytes)
-            end,
-        ErrorCode = 0,
-        HighWaterMark = vg_topics:lookup_hwm(Topic, Partition),
-        Response = vg_protocol:encode_fetch_response(Topic, Partition, ErrorCode, HighWaterMark, Bytes),
-        lager:info("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
-        gen_tcp:send(Socket, [<<(Bytes + 4 + iolist_size(Response)):32/signed-integer,
-                                CorrelationId:32/signed-integer>>, Response]),
-        {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, [])
-        %% maybe catch any errors here and report them?
-    after
-        file:close(Fd)
-    end.
-
 -spec decode_topic(binary()) -> {topic_partition(), binary()}.
 decode_topic(<<Size:16/signed-integer, Topic:Size/binary, PartitionsRaw/binary>>) ->
     {Partitions, Rest} = vg_protocol:decode_array(fun decode_partition/1, PartitionsRaw),
@@ -274,6 +253,87 @@ decode_partition2(<<Partition:32/signed-integer, FetchOffset:64/signed-integer,
     {{Partition, FetchOffset, MaxBytes, Index}, Rest}.
 
 %%
+
+fetch(Topic, Partitions) ->
+    TopicResponseHeader = [vg_protocol:encode_string(Topic), <<(length(Partitions)):32/signed-integer>>],
+    HeaderSize = 4 + 2 + size(Topic),
+    {Size, Response} =
+        lists:foldl(fun({Partition, Offset, MaxBytes}, {Size, ResponseAcc}) ->
+                            {S, R, F} = fetch(Topic, Partition, Offset, MaxBytes, -1),
+                            {Size + S, [R, F | ResponseAcc]};
+                       ({Partition, Offset, MaxBytes, MaxIndex}, {Size, ResponseAcc}) ->
+                            {S, R, F} = fetch(Topic, Partition, Offset, MaxBytes, MaxIndex),
+                            {Size + S, [R, F | ResponseAcc]}
+                    end, {HeaderSize, []}, Partitions),
+    {Size, [TopicResponseHeader | Response]}.
+
+fetch(Topic, Partition, Offset, MaxBytes, MaxIndex) ->
+    {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
+    Fetch =
+        case MaxIndex of
+            -1 ->
+                unlimited;
+            _ ->
+                {EndSegmentId, EndPosition} =
+                    vg_log_segments:find_segment_offset(Topic, Partition, MaxIndex + 1),
+                case SegmentId of
+                    %% max on this segment, limit fetch
+                    EndSegmentId ->
+                        {limited, EndPosition - Position};
+                    %% some higher segment, unlimited fetch
+                    _ ->
+                        unlimited
+                end
+        end,
+
+    lager:info("at=fetch_request topic=~s partition=~p offset=~p segment_id=~p position=~p",
+              [Topic, Partition, Offset, SegmentId, Position]),
+
+    File = vg_utils:log_file(Topic, Partition, SegmentId),
+    {ok, Fd} = file:open(File, [read, binary, raw]),
+    try
+        SendBytes =
+            case Fetch of
+                unlimited ->
+                    filelib:file_size(File) - Position;
+                {limited, Limit} ->
+                    Limit
+            end,
+        Bytes =
+            case MaxBytes of
+                0 -> SendBytes;
+                _ -> min(SendBytes, MaxBytes)
+            end,
+        ErrorCode = 0,
+        HighWaterMark = vg_topics:lookup_hwm(Topic, Partition),
+        Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HighWaterMark, Bytes),
+
+        lager:debug("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
+        {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}
+    catch _:_ ->
+            {0, <<>>, noop}  %% is this the safe? TODO: add test
+    after
+        file:close(Fd)
+    end.
+
+%% a fetch response is a list of iolists and tuples representing file chunks to send through sendfile
+do_send(FetchResults, Socket) ->
+    lists:foreach(fun({File, Position, Bytes}) ->
+                       sendfile(File, Position, Bytes, Socket);
+                     (noop) ->
+                       noop;
+                     (IoList) ->
+                       gen_tcp:send(Socket, IoList)
+                  end, FetchResults).
+
+sendfile(File, Position, Bytes, Socket) ->
+    {ok, Fd} = file:open(File, [read, binary, raw]),
+    try
+        {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, [])
+        %% maybe catch any errors here and report them?
+    after
+        file:close(Fd)
+    end.
 
 flush_socket(Socket) ->
     receive

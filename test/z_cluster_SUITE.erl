@@ -14,6 +14,7 @@ init_per_suite(Config) ->
     application:stop(vonnegut),
     application:unload(vonnegut),
     application:load(vonnegut),
+    application:set_env(vonnegut, client_pool_size, 2),
 
     %% start several nodes
     ErlFlags = "-config ../../../../cluster/sys.config",
@@ -43,6 +44,7 @@ init_per_suite(Config) ->
                                    {application, set_env, [partisan, gossip_interval, 500]},
                                    {application, load, [vonnegut]},
                                    {application, set_env, [vonnegut, chain, chain(5555+N0)]},
+                                   {application, set_env, [vonnegut, client_pool_size, 2]},
                                    {application, set_env,
                                     [vonnegut, log_dirs, ["data/node" ++ N ++ "/"]]},
                                    {application, ensure_all_started, [vonnegut]}]},
@@ -195,7 +197,7 @@ bootstrap(Config) ->
     {ok, R} = vg_client:produce(<<"foo">>, <<"bar">>),
     {ok, R1} = vg_client:fetch(<<"foo">>),
     ct:pal("r ~p ~p", [R, R1]),
-    ?assertMatch(#{record_set := [#{record := <<"bar">>}]}, R1),
+    ?assertMatch(#{<<"foo">> := #{0 := #{record_set := [#{record := <<"bar">>}]}}}, R1),
     Config.
 
 roles(Config) ->
@@ -204,15 +206,17 @@ roles(Config) ->
     [vg_client:produce(Topic, <<"bar", (integer_to_binary(N))/binary>>)
      || N <- lists:seq(1, 20)],
     timer:sleep(100),
-    vg_client:fetch(Topic),
+    {ok, #{<<"foo">> := #{0 := #{record_set := _ }}}} = vg_client:fetch(Topic),
 
     %% try to do a read on the head
     {ok, WritePool} = vg_client_pool:get_pool(Topic, write),
     {ok, ReadPool} = vg_client_pool:get_pool(Topic, read),
 
     {ok, R} = shackle:call(WritePool, {fetch, [{Topic, [{0, 12, 100}]}]}),
-    timer:sleep(1000),
     ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, R),
+
+    {ok, R2} = shackle:call(WritePool, {fetch2, [{Topic, [{0, 12, 100, 13}]}]}),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, R2),
 
     %% try to do a write on the tail
     {ok, R1} =  shackle:call(ReadPool, {produce, [{Topic, [{0, [<<"bar3000">>, <<"barn_owl">>]}]}]}),

@@ -42,6 +42,7 @@ ensure_topic(Topic) ->
     %% always use the metadata topic, creation happens inside via a global process.
     shackle:call(metadata, {metadata, [Topic]}, ?TIMEOUT).
 
+
 -spec fetch(Topic)
            -> {ok, #{high_water_mark := integer(),
                      record_set_size := integer(),
@@ -49,32 +50,66 @@ ensure_topic(Topic) ->
                      record_set := RecordSet}}
                   when Topic :: vg:topic() | [{vg:topic(), [{integer(), integer(), integer()}]}],
                        RecordSet :: vg:record_set().
+
+%% if we don't want to expose the tuple in the second clauses of
+%% fetch/1 and fetch/2, we could do something like fetch_partial,
+%% which would return the tuple and options, which then could be fed
+%% into an execute_multifetch function which would do the right thing.
+
 fetch(Topic) when is_binary(Topic) ->
-    fetch(Topic, 0).
+    do_fetch([{Topic, 0, #{}}], ?TIMEOUT);
+fetch(Requests) when is_list(Requests) ->
+    do_fetch(Requests, ?TIMEOUT).
 
-fetch(Topic, Position) ->
-    fetch(Topic, Position, #{}).
+fetch(Topic, Position) when is_binary(Topic) ->
+    do_fetch([{Topic, Position, #{}}], ?TIMEOUT);
+fetch(Requests, Timeout) when is_list(Requests) ->
+    do_fetch(Requests, Timeout).
 
-fetch(Topic, Position, Opts) ->
-    Timeout = maps:get(timeout, Opts, ?TIMEOUT),
-    MaxBytes = maps:get(max_bytes, Opts, 0),
-    {Op, Args} =
-        case maps:get(max_index, Opts, undefined) of
-            undefined ->
-                {fetch, [{Topic, [{0, Position, MaxBytes}]}]};
-            MaxIndex ->
-                {fetch2, [{Topic, [{0, Position, MaxBytes, MaxIndex}]}]}
-        end,
-    {ok, Pool} = vg_client_pool:get_pool(Topic, read),
-    lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-    case shackle:call(Pool, {Op, Args}, Timeout) of
-        {ok, #{Topic := #{0 := Result=#{error_code := 0}}}} ->
-            {ok, Result};
-        {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
-            {error, ErrorCode};
-        {error, Reason} ->
-            {error, Reason}
-    end.
+fetch(Topic, Position, MaxIndex) when is_binary(Topic) ->
+    do_fetch([{Topic, Position, #{max_index => MaxIndex}}], ?TIMEOUT).
+
+do_fetch(Requests, Timeout) ->
+    PoolReqs =
+        lists:foldl(
+          fun({Topic, _Position, _Opts} = R, Acc) ->
+                  {ok, Pool} = vg_client_pool:get_pool(Topic, read),
+                  lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
+                  case Acc of
+                      #{Pool := PoolReqs} ->
+                          Acc#{Pool => [R | PoolReqs]};
+                      _ ->
+                          Acc#{Pool => [R]}
+                  end
+          end, #{}, Requests),
+    %% should we do these in parallel?
+    Resps = maps:map(
+              fun(Pool, TPO0) ->
+                      TPO = [begin
+                                 MaxBytes = maps:get(max_bytes, Opts, 0),
+                                 MaxIndex = maps:get(max_index, Opts, -1),
+                                 {Topic, [{0, Position, MaxBytes, MaxIndex}]}
+                             end
+                             || {Topic, Position, Opts} <- TPO0],
+                      case shackle:call(Pool, {fetch2, TPO}, Timeout) of
+                          {ok, Result} ->
+                              %% if there are any error codes in any
+                              %% of these, transform the whole thing
+                              %% into an error
+                              {ok, Result};
+                          {error, Reason} ->
+                              {error, Reason}
+                      end
+              end, PoolReqs),
+    lists:foldl(
+      fun(_, {error, Response}) ->
+              {error, Response};
+         ({_Pool, {ok, Response}}, {ok, Acc}) ->
+              {ok, maps:merge(Acc, Response)};
+         ({_Pool, {error, Response}}, _) ->
+              {error, Response}
+      end,
+      {ok, #{}}, maps:to_list(Resps)).
 
 -spec produce(Topic, RecordSet)
              -> {ok, integer()} | {error, term()}

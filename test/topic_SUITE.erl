@@ -54,10 +54,10 @@ write(Config) ->
                    "each according to their needs">>,
     {ok, R1} = vg_client:produce(Topic, Communist),
     ct:pal("reply: ~p", [R1]),
-    {ok, #{record_set := Reply}} = vg_client:fetch(Topic, R1),
+    {ok, #{Topic := #{0 := #{record_set := Reply}}}} = vg_client:fetch(Topic, R1),
     ?assertMatch([#{record := Communist}], Reply),
 
-    {ok, #{record_set := Reply1}} = vg_client:fetch(Topic, R1 - 1),
+    {ok, #{Topic := #{0 := #{record_set := Reply1}}}} = vg_client:fetch(Topic, R1 - 1),
     ?assertMatch([#{record := Anarchist}, #{record := Communist}], Reply1).
 
 index_bug(Config) ->
@@ -68,12 +68,13 @@ index_bug(Config) ->
                                  lists:duplicate(100, <<"123456789abcdef">>)),
 
     %% fetch from 0 to make sure that they're all there
-    {ok, #{record_set := Reply}} = vg_client:fetch(Topic, 0),
+    {ok, #{Topic := #{0 := #{record_set := Reply}}}} = vg_client:fetch(Topic, 0),
     ?assertEqual(100, length(Reply)),
 
     %% now query for something before the first index marker
-    {ok, #{record_set := Reply2,
-           high_water_mark := HWM}} = vg_client:fetch(Topic, 10),
+    {ok, #{Topic := #{0 := #{record_set := Reply2,
+                             high_water_mark := HWM}}}} =
+        vg_client:fetch(Topic, 10),
 
     ?assertEqual(99, HWM),
 
@@ -86,11 +87,11 @@ index_bug(Config) ->
     {ok, _}  = vg_client:produce(Topic,
                                  lists:duplicate(100, <<"123456789abcdef">>)),
 
-    {ok, #{record_set := Reply3}} = vg_client:fetch(Topic, 0),
+    {ok, #{Topic := #{0 := #{record_set := Reply3}}}} = vg_client:fetch(Topic, 0),
     ?assertEqual(200, length(Reply3)),
 
-    {ok, #{record_set := Reply4,
-           high_water_mark := HWM4}} = vg_client:fetch(Topic, 10),
+    {ok, #{Topic := #{0 := #{record_set := Reply4,
+           high_water_mark := HWM4}}}} = vg_client:fetch(Topic, 10),
 
     ?assertEqual(199, HWM4),
     ?assertEqual(190, length(Reply4)).
@@ -102,13 +103,15 @@ limit(Config) ->
     {ok, _}  = vg_client:produce(Topic,
                                  lists:duplicate(100, <<"123456789abcdef">>)),
 
-    {ok, #{record_set := Reply}} = vg_client:fetch(Topic, 0),
+    {ok, #{Topic := #{0 := #{record_set := Reply}}}} = vg_client:fetch(Topic),
     ?assertEqual(100, length(Reply)),
 
-    {ok, #{record_set := Reply2}} = vg_client:fetch(Topic, 0, #{max_bytes => 1000}),
+    {ok, #{Topic := #{0 := #{record_set := Reply2}}}} =
+               vg_client:fetch([{Topic, 0, #{max_bytes => 1000}}]),
     ?assertEqual(24, length(Reply2)),
 
-    {ok, #{record_set := []}} = vg_client:fetch(Topic, 0, #{max_bytes => 1}),
+    {ok, #{Topic := #{0 := #{record_set := []}}}} =
+               vg_client:fetch([{Topic, 0, #{max_bytes => 1}}]),
 
     ok.
 
@@ -118,17 +121,17 @@ index_limit(Config) ->
     {ok, _}  = vg_client:produce(Topic,
                                  lists:duplicate(100, <<"123456789abcdef">>)),
 
-    {ok, #{record_set := Reply}} = vg_client:fetch(Topic, 0),
+    {ok, #{Topic := #{0 := #{record_set := Reply}}}} = vg_client:fetch(Topic, 0),
     ?assertEqual(100, length(Reply)),
 
-    {ok, #{record_set := Reply2}} = vg_client:fetch(Topic, 0, #{max_index => 50}),
+    {ok, #{Topic := #{0 := #{record_set := Reply2}}}} = vg_client:fetch(Topic, 0, 50),
     ?assertEqual(51, length(Reply2)),
 
     %% max_bytes overrides max_index
-    {ok, #{record_set := Reply3}} = vg_client:fetch(Topic, 0, #{max_index => 50, max_bytes => 1000}),
+    {ok, #{Topic := #{0 := #{record_set := Reply3}}}} = vg_client:fetch([{Topic, 0, #{max_index => 50, max_bytes => 1000}}]),
     ?assertEqual(24, length(Reply3)),
 
-    {ok, #{record_set := []}} = vg_client:fetch(Topic, 0, #{max_bytes => 1}),
+    {ok, #{Topic := #{0 := #{record_set := []}}}} = vg_client:fetch([{Topic, 0, #{max_bytes => 1}}]),
 
     ok.
 
