@@ -125,11 +125,23 @@ index_limit(Config) ->
     ?assertEqual(100, length(Reply)),
 
     {ok, #{Topic := #{0 := #{record_set := Reply2}}}} = vg_client:fetch(Topic, 0, 50),
-    ?assertEqual(51, length(Reply2)),
+    ?assertEqual(50, length(Reply2)),
 
     %% max_bytes overrides max_index
-    {ok, #{Topic := #{0 := #{record_set := Reply3}}}} = vg_client:fetch([{Topic, 0, #{max_index => 50, max_bytes => 1000}}]),
+    {ok, #{Topic := #{0 := #{record_set := Reply3}}}} = vg_client:fetch([{Topic, 0, #{limit => 50, max_bytes => 1000}}]),
     ?assertEqual(24, length(Reply3)),
+
+    %% limit returns Offset to Offset+Limit
+    {ok, #{Topic := #{0 := #{record_set := Reply4}}}} = vg_client:fetch([{Topic, 10, #{limit => 20}}]),
+    ?assertEqual(20, length(Reply4)),
+    ?assertMatch(#{id := 10}, hd(Reply4)),
+    ?assertMatch(#{id := 29}, hd(lists:reverse(Reply4))),
+
+    %% -1 Offset returns HWM-Limit to HWM
+    {ok, #{Topic := #{0 := #{record_set := Reply5}}}} = vg_client:fetch([{Topic, -1, #{limit => 20}}]),
+    ?assertEqual(20, length(Reply5)),
+    ?assertMatch(#{id := 80}, hd(Reply5)),
+    ?assertMatch(#{id := 99}, hd(lists:reverse(Reply5))),
 
     {ok, #{Topic := #{0 := #{record_set := []}}}} = vg_client:fetch([{Topic, 0, #{max_bytes => 1}}]),
 

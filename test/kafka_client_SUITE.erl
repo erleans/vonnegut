@@ -43,13 +43,12 @@ get_metadata(Config) ->
     ok = vg:create_topic(Topic),
 
     %% same host will be in broker list twice because we send the same broker as the tail
-    ?assertMatch({ok,{kpro_MetadataResponse,
-                      [{kpro_Broker,0,Host,Port},
-                       {kpro_Broker,0,Host,Port}],
-                      [{kpro_TopicMetadata,no_error,
-                        Topic,
-                        [{kpro_PartitionMetadata,no_error,0,0,[0],[]}]} | _]}}, brod:get_metadata(Hosts)).
-
+    {ok,
+     [{brokers,
+       [[{node_id,0},{host,Host},{port,Port}],
+        [{node_id,0},{host,Host},{port,Port}]]},
+      {topic_metadata, TMs}]} = brod:get_metadata(Hosts),
+    ?assert(lists:any(fun(TM) -> lists:member({topic,Topic}, TM) end, TMs)).
 
 produce(Config) ->
     Hosts = ?config(hosts, Config),
