@@ -19,6 +19,7 @@
 %% non-kafka extension
 -define(TOPICS_REQUEST, 1000).
 -define(FETCH2_REQUEST, 1001).
+-define(ENSURE_REQUEST, 1002).
 
 -define(NONE_ERROR, 0).
 -define(FETCH_DISALLOWED_ERROR, 129).
