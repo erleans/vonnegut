@@ -54,9 +54,9 @@ encode_partitions(Partitions) ->
     encode_array([case PartitionTuple of
                       {Partition, Offset, MaxBytes} ->
                           <<Partition:32/signed-integer, Offset:64/signed-integer, MaxBytes:32/signed-integer>>;
-                      {Partition, Offset, MaxBytes, MaxIndex} ->
+                      {Partition, Offset, MaxBytes, Limit} ->
                           <<Partition:32/signed-integer, Offset:64/signed-integer,
-                            MaxBytes:32/signed-integer, MaxIndex:32/signed-integer>>
+                            MaxBytes:32/signed-integer, Limit:32/signed-integer>>
                   end || PartitionTuple <- Partitions]).
 
 encode_request(ApiKey, CorrelationId, ClientId, Request) ->

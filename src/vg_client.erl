@@ -66,8 +66,8 @@ fetch(Topic, Position) when is_binary(Topic) ->
 fetch(Requests, Timeout) when is_list(Requests) ->
     do_fetch(Requests, Timeout).
 
-fetch(Topic, Position, MaxIndex) when is_binary(Topic) ->
-    do_fetch([{Topic, Position, #{max_index => MaxIndex}}], ?TIMEOUT).
+fetch(Topic, Position, Limit) when is_binary(Topic) ->
+    do_fetch([{Topic, Position, #{limit => Limit}}], ?TIMEOUT).
 
 do_fetch(Requests, Timeout) ->
     PoolReqs =
@@ -87,8 +87,8 @@ do_fetch(Requests, Timeout) ->
               fun(Pool, TPO0) ->
                       TPO = [begin
                                  MaxBytes = maps:get(max_bytes, Opts, 0),
-                                 MaxIndex = maps:get(max_index, Opts, -1),
-                                 {Topic, [{0, Position, MaxBytes, MaxIndex}]}
+                                 Limit = maps:get(limit, Opts, -1),
+                                 {Topic, [{0, Position, MaxBytes, Limit}]}
                              end
                              || {Topic, Position, Opts} <- TPO0],
                       case shackle:call(Pool, {fetch2, TPO}, Timeout) of

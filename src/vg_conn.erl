@@ -182,7 +182,7 @@ handle_request(?FETCH_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signe
 handle_request(?FETCH2_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
                                      _MinBytes:32/signed, Rest/binary>>,
                CorrelationId, Socket) ->
-    {[{Topic, [{Partition, _Offset, _MaxBytes, _MaxIndex} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic2/1, Rest),
+    {[{Topic, [{Partition, _Offset, _MaxBytes, _Limit} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic2/1, Rest),
     lager:info("at=fetch2_request error=request_disallowed topic=~s partition=~p", [Topic, Partition]),
     Response = vg_protocol:encode_array([[vg_protocol:encode_string(Topic),
                                           vg_protocol:encode_array([vg_protocol:encode_fetch_topic_response(Partition,
@@ -261,21 +261,25 @@ fetch(Topic, Partitions) ->
         lists:foldl(fun({Partition, Offset, MaxBytes}, {Size, ResponseAcc}) ->
                             {S, R, F} = fetch(Topic, Partition, Offset, MaxBytes, -1),
                             {Size + S, [R, F | ResponseAcc]};
-                       ({Partition, Offset, MaxBytes, MaxIndex}, {Size, ResponseAcc}) ->
-                            {S, R, F} = fetch(Topic, Partition, Offset, MaxBytes, MaxIndex),
+                       ({Partition, Offset, MaxBytes, Limit}, {Size, ResponseAcc}) ->
+                            {S, R, F} = fetch(Topic, Partition, Offset, MaxBytes, Limit),
                             {Size + S, [R, F | ResponseAcc]}
                     end, {HeaderSize, []}, Partitions),
     {Size, [TopicResponseHeader | Response]}.
 
-fetch(Topic, Partition, Offset, MaxBytes, MaxIndex) ->
+%% A fetch of offset -1 returns Limit number of the records up to the high watermark
+fetch(Topic, Partition, -1, MaxBytes, Limit) ->
+    Offset = vg_topics:lookup_hwm(Topic, Partition),
+    fetch(Topic, Partition, Offset - Limit + 1, MaxBytes, Limit);
+fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
     {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
     Fetch =
-        case MaxIndex of
+        case Limit of
             -1 ->
                 unlimited;
             _ ->
                 {EndSegmentId, EndPosition} =
-                    vg_log_segments:find_segment_offset(Topic, Partition, MaxIndex + 1),
+                    vg_log_segments:find_segment_offset(Topic, Partition, Offset + Limit),
                 case SegmentId of
                     %% max on this segment, limit fetch
                     EndSegmentId ->
@@ -296,8 +300,8 @@ fetch(Topic, Partition, Offset, MaxBytes, MaxIndex) ->
             case Fetch of
                 unlimited ->
                     filelib:file_size(File) - Position;
-                {limited, Limit} ->
-                    Limit
+                {limited, Limited} ->
+                    Limited
             end,
         Bytes =
             case MaxBytes of
