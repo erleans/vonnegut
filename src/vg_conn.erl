@@ -120,6 +120,43 @@ handle_request(?METADATA_REQUEST, _, Data, CorrelationId, Socket) ->
     Topics0 = vg_protocol:decode_metadata_request(Data),
     Topics = case Topics0 of
                  [] -> vg_topics:all();
+                 _ -> Topics0
+             end,
+    lager:info("at=metadata_request topics=~p", [Topics]),
+    %% need to return all nodes and start giving nodes an integer id
+    {_, Chains, _} = vg_cluster_mgr:get_map(),
+    {_, Nodes} = maps:fold(fun(_Name, #chain{head={HeadHost, HeadPort},
+                                             tail={TailHost, TailPort}}, {Id, Acc}) ->
+                               HeadNode = {Id, {HeadHost, HeadPort}},
+                               case {TailHost, TailPort} of
+                                   {HeadHost, HeadPort} ->
+                                       %% same as head node
+                                       TailNode = {Id, {TailHost, TailPort}},
+                                       {Id+1, [HeadNode, TailNode | Acc]};
+                                   _ ->
+                                       TailNode = {Id+1, {TailHost, TailPort}},
+                                       {Id+2, [HeadNode, TailNode | Acc]}
+                               end
+                        end, {0, []}, Chains),
+    TopicMetadata =
+        lists:flatten([try
+                           #chain{head=Head,
+                                  tail=Tail} = vg_topics:get_chain(Topic),
+                           {HeadId, _} = lists:keyfind(Head, 2, Nodes),
+                           {TailId, _} = lists:keyfind(Tail, 2, Nodes),
+                           {0, Topic, [{0, HeadId, 0, [TailId], []}]}
+                       catch _:_ ->
+                               %% if the topic doesn't exist, omit it,
+                               %% so we can check for non-existent topics.
+                               []
+                       end || Topic <- Topics]),
+    Response = vg_protocol:encode_metadata_response(Nodes, TopicMetadata),
+    Size = erlang:iolist_size(Response) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, Response]);
+handle_request(?ENSURE_REQUEST, _, Data, CorrelationId, Socket) ->
+    Topics0 = vg_protocol:decode_metadata_request(Data),
+    Topics = case Topics0 of
+                 [] -> vg_topics:all();
                  _ -> [vg:ensure_topic(T) || T <- Topics0], Topics0
              end,
     lager:info("at=metadata_request topics=~p", [Topics]),

@@ -84,12 +84,14 @@ get_pool(Topic, RW) ->
     %% list is being refreshed.
     case ets:lookup(?topic_map, Topic) of
         [] ->
-            %% TODO: this creates a topic on a read, which isn't great
-            case vg_client:ensure_topic(Topic) of
+            case vg_client:metadata([Topic]) of
                 {ok, {_Chains, #{Topic := Chain}}} ->
                     ets:insert(?topic_map, {Topic, Chain}),
                     Pool = make_pool_name(Chain, RW),
                     {ok, Pool};
+                %% topic doesn't exist
+                {ok, {_, #{}}} ->
+                    {error, not_found};
                 {error, Reason} ->
                     {error, Reason}
             end;

@@ -27,7 +27,7 @@ end_per_suite(Config) ->
 init_per_testcase(_, Config) ->
     ok = vg_client_pool:start(#{reconnect => false}),
     Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
-    vg:create_topic(Topic),
+    {ok, _} = vg_client:ensure_topic(Topic),
     [{topic, Topic} | Config].
 
 end_per_testcase(_, Config) ->
@@ -118,8 +118,8 @@ limit(Config) ->
 index_limit(Config) ->
     Topic = ?config(topic, Config),
 
-    {ok, _}  = vg_client:produce(Topic,
-                                 lists:duplicate(100, <<"123456789abcdef">>)),
+    {ok, _} = vg_client:produce(Topic,
+                                lists:duplicate(100, <<"123456789abcdef">>)),
 
     {ok, #{Topic := #{0 := #{record_set := Reply}}}} = vg_client:fetch(Topic, 0),
     ?assertEqual(100, length(Reply)),
@@ -158,7 +158,8 @@ many(Config) ->
          Topic = vg_test_utils:create_random_name(<<"many-topic-", N/binary>>),
          %% adding a record to the topic will create it under current settings
          ct:pal("adding to topic: ~p", [Topic]),
-         {ok, _}  = vg_client:produce(Topic, [<<"woo">>])
+         {ok, _} = vg_client:ensure_topic(Topic),
+         {ok, _} = vg_client:produce(Topic, [<<"woo">>])
      end || N0 <- lists:seq(1, TopicCount)],
     Duration = erlang:monotonic_time(milli_seconds) - Start,
     ct:pal("creating ~p topics took ~p ms", [TopicCount, Duration]),

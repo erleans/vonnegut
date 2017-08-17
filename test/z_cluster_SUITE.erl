@@ -194,6 +194,7 @@ all() ->
 bootstrap(Config) ->
     %% just create topics when written to for now
     %% do(vg, create_topic, [<<"foo">>]),
+    {ok, _} = vg_client:ensure_topic(<<"foo">>),
     {ok, R} = vg_client:produce(<<"foo">>, <<"bar">>),
     {ok, R1} = vg_client:fetch(<<"foo">>),
     ct:pal("r ~p ~p", [R, R1]),
@@ -202,6 +203,7 @@ bootstrap(Config) ->
 
 roles(Config) ->
     Topic = <<"foo">>,
+    {ok, _} = vg_client:ensure_topic(Topic),
     %% write some stuff to have something to read.
     [vg_client:produce(Topic, <<"bar", (integer_to_binary(N))/binary>>)
      || N <- lists:seq(1, 20)],
@@ -234,6 +236,7 @@ roles(Config) ->
     Config.
 
 acks(Config) ->
+    {ok, _} = vg_client:ensure_topic(<<"foo">>),
     [vg_client:produce(<<"foo">>, <<"bar", (integer_to_binary(N))/binary>>)
      || N <- lists:seq(1, 20)],
 
@@ -242,6 +245,7 @@ acks(Config) ->
 
 concurrent_fetch(_Config) ->
     Topic = vg_test_utils:create_random_name(<<"cluster_concurrent_fetch">>),
+    {ok, _} = vg_client:ensure_topic(Topic),
     RandomRecords = [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
                      crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
                      crypto:strong_rand_bytes(60)],
@@ -275,6 +279,10 @@ concurrent_perf(_Config) ->
     Topic1 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf1">>),
     Topic2 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf2">>),
     Topic3 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf3">>),
+
+    {ok, _} = vg_client:ensure_topic(Topic1),
+    {ok, _} = vg_client:ensure_topic(Topic2),
+    {ok, _} = vg_client:ensure_topic(Topic3),
 
     RandomRecords = [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
                      crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
