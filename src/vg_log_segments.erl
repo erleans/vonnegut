@@ -83,7 +83,7 @@ find_active_segment(Topic, Partition) ->
       RecordId :: integer().
 find_segment_offset(_Topic, _Partition, 0) ->
     {0, 0};
-find_segment_offset(Topic, Partition, RecordId) ->
+find_segment_offset(Topic, Partition, RecordId) when RecordId >= 0 ->
     SegmentId = find_log_segment(Topic, Partition, RecordId),
     {SegmentId, find_record_offset(Topic, Partition, SegmentId, RecordId)}.
 
