@@ -307,7 +307,7 @@ fetch(Topic, Partitions) ->
 %% A fetch of offset -1 returns Limit number of the records up to the high watermark
 fetch(Topic, Partition, -1, MaxBytes, Limit) ->
     Offset = vg_topics:lookup_hwm(Topic, Partition),
-    fetch(Topic, Partition, Offset - Limit + 1, MaxBytes, Limit);
+    fetch(Topic, Partition, erlang:max(0, Offset - Limit + 1), MaxBytes, Limit);
 fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
     {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
     Fetch =

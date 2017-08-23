@@ -143,6 +143,10 @@ index_limit(Config) ->
     ?assertMatch(#{id := 80}, hd(Reply5)),
     ?assertMatch(#{id := 99}, hd(lists:reverse(Reply5))),
 
+    %% -1 Offset with limit larger than HWM starts from 0
+    {ok, #{Topic := #{0 := #{record_set := Reply6}}}} = vg_client:fetch([{Topic, -1, #{limit => 200}}]),
+    ?assertEqual(100, length(Reply6)),
+
     {ok, #{Topic := #{0 := #{record_set := []}}}} = vg_client:fetch([{Topic, 0, #{max_bytes => 1}}]),
 
     ok.
