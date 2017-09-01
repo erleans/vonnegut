@@ -5,7 +5,7 @@
 -compile(export_all).
 
 all() ->
-    [creation, write, index_bug, limit, index_limit, many].
+    [creation, write_empty, write, index_bug, limit, index_limit, many].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -17,6 +17,7 @@ init_per_suite(Config) ->
     application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
     application:set_env(vonnegut, chain, [{discovery, local}]),
     application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
+    application:set_env(vonnegut, client_pool_size, 2),
     {ok, _} = application:ensure_all_started(vonnegut),
     Config.
 
@@ -41,6 +42,23 @@ creation(_Config) ->
     TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
     vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)).
+
+%% leaving this in as it occasionally hits a quasi race, so if we
+%% start hitting intermittent failures here, we might have a regression
+write_empty(_Config) ->
+    Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
+    {ok, _} = vg_client:ensure_topic(Topic),
+    spawn(fun() -> vg_client:produce(Topic, <<"fleerp">>) end),
+    {ok, #{Topic := #{0 := #{record_set := Reply}}}} = vg_client:fetch(Topic, 0),
+    case Reply of
+        [#{record := <<"fleerp">>}] -> % write then read
+            ok;
+        [] -> % read then write
+            ok;
+        _ ->
+            ct:pal("got ~p", [Reply]),
+            error(bad_return)
+    end.
 
 write(Config) ->
     Topic = ?config(topic, Config),
