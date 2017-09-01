@@ -359,7 +359,11 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
 
 %% a fetch response is a list of iolists and tuples representing file chunks to send through sendfile
 do_send(FetchResults, Socket) ->
-    lists:foreach(fun({File, Position, Bytes}) ->
+    lists:foreach(fun({_File, _Position, 0}) ->
+                          %% have to noop here, as we're already framed,
+                          %% and 0 has special meaning for sendfile
+                          noop;
+                     ({File, Position, Bytes}) ->
                        sendfile(File, Position, Bytes, Socket);
                      (noop) ->
                        noop;
