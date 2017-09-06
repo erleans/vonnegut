@@ -37,6 +37,13 @@ start_cluster_mgr(Name, Nodes) ->
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
+    Port = application:get_env(vonnegut, http_port, 8000),
+    ElliChild = {vonnegut_http, {elli, start_link, [[{callback, elli_middleware},
+                                                     {callback_args, [{mods, [{elli_prometheus, []},
+                                                                              {vg_elli_handler, []}]}]},
+                                                     {port, Port}]]},
+                permanent, 5000, worker, dynamic},
+
     case application:get_env(vonnegut, chain, []) of
         [] ->
             {ok, {{one_for_one, 10, 30}, []}};
@@ -48,7 +55,8 @@ init([]) ->
             PoolSup = {vg_pool_sup, {vg_pool_sup, start_link, []},
                        permanent, 20000, supervisor, [vg_pool_sup]},
 
-            {ok, {{one_for_one, 10, 30}, [TopicsSup, ChainState, PoolSup]}}
+            {ok, {{one_for_one, 10, 30}, [ElliChild, TopicsSup,
+                                          ChainState, PoolSup]}}
     end.
 
 %%====================================================================
