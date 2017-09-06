@@ -45,6 +45,7 @@ init_per_suite(Config) ->
                                    {application, load, [vonnegut]},
                                    {application, set_env, [vonnegut, chain, chain(5555+N0)]},
                                    {application, set_env, [vonnegut, client_pool_size, 2]},
+                                   {application, set_env, [vonnegut, http_port, 8000+N0]},
                                    {application, set_env,
                                     [vonnegut, log_dirs, ["data/node" ++ N ++ "/"]]},
                                    {application, ensure_all_started, [vonnegut]}]},
