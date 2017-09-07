@@ -208,5 +208,5 @@ lookup({srv, DiscoveryDomain}) ->
                     %% we could also do this by querying
                     %% the srv records of _data._tcp.vonnegut.default.svc.cluster.local
                     ClientPort = rpc:call(Node, vg_config, port, []),
-                    ordsets:add_element({Node, H, PartisanPort, ClientPort}, NodesAcc)
+                    ordsets:add_element({?NODENAME, H, PartisanPort, ClientPort}, NodesAcc)
                 end, ordsets:new(), inet_res:lookup(DiscoveryDomain, in, srv)).
