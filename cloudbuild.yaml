@@ -1,0 +1,4 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'us.gcr.io/nucleus-sti/vonnegut:master', '.']
+images: ['us.gcr.io/nucleus-sti/vonnegut:master']

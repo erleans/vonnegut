@@ -49,7 +49,7 @@ init_per_suite(Config) ->
                                    {application, set_env,
                                     [vonnegut, log_dirs, ["data/node" ++ N ++ "/"]]},
                                    {application, ensure_all_started, [vonnegut]}]},
-
+                                 {env, [{"PEER_PORT", integer_to_list(15555+N0)}]},
                                  {erl_flags, ErlFlags}]),
              HostNode
          end
@@ -76,8 +76,8 @@ test_node(N) ->
 chain(N) ->
     [{name, chain1},
      {discovery, {direct, [{'chain1-0', "127.0.0.1", 15555, 5555},
-                           {'chain1-1', "127.0.0.1", 15555, 5556},
-                           {'chain1-2', "127.0.0.1", 15555, 5557}]}},
+                           {'chain1-1', "127.0.0.1", 15556, 5556},
+                           {'chain1-2', "127.0.0.1", 15557, 5557}]}},
      {replicas, 3},
      {port, N}].
 
