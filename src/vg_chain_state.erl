@@ -18,6 +18,8 @@
          terminate/3,
          code_change/4]).
 
+-include_lib("kernel/include/inet.hrl").
+
 -type chain_name() :: atom().
 -type role() :: head | tail | middle | solo | undefined.
 -type chain_node() :: {atom(), inet:ip_address() | inet:hostname(), inet:port_number(), inet:port_number()}.
@@ -186,7 +188,18 @@ find_next(Node, Nodes) ->
 join(ClusterType) ->
     AllNodes = lookup(ClusterType),
     ordsets:fold(fun({Name, Host, PartisanPort, _ClientPort}, _) ->
-                     vg_peer_service:join({Name, Host, PartisanPort})
+                     Node = list_to_atom(atom_to_list(Name)++"@"++Host),
+                     IP = case inet:parse_address(Host) of
+                              {error, einval} ->
+                                  {ok, #hostent{h_addr_list=[IPAddress | _]}} = inet_res:getbyname(Host, a),
+                                  IPAddress;
+                              {ok, IPAddress} ->
+                                  IPAddress
+                          end,
+                     N = #{name => Node,
+                           listen_addrs => [#{ip => IP, port => PartisanPort}],
+                           parallelism => 1},
+                     vg_peer_service:join(N)
                  end, ok, AllNodes),
     {ok, Members} = vg_peer_service:members(),
     {lists:usort(Members), AllNodes}.
