@@ -7,6 +7,8 @@
    [kernel,
     stdlib,
     lager,
+    crypto,
+    ssl,
     sasl,
     acceptor_pool,
     shackle,
@@ -14,7 +16,12 @@
     partisan,
     elli,
     elli_prometheus,
-    prometheus
+    prometheus,
+
+    hackney,
+    jsx,
+    oc_google_reporter,
+    opencensus
    ]},
   {env,[{log_dirs, ["./data"]},
         {acceptor_pool_size, 10},
@@ -31,7 +38,7 @@
         {delayed_write_byte_size, 64000}, %% 64kb
         {delayed_write_milliseconds, 2000}, %% 2 seconds
 
-        {log_cleaner, true},
+        {log_cleaner, false},
         {log_retention_check_interval, 5}, %% 5 minutes
         {log_retention_minutes, 10080}, %% 7 days
 
