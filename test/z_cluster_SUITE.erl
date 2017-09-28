@@ -9,6 +9,8 @@ suite() ->
     [{timetrap,{minutes,30}}].
 
 init_per_suite(Config) ->
+    application:stop(partisan),
+    application:stop(vonnegut),
     application:unload(vonnegut),
     application:load(vonnegut),
     application:set_env(vonnegut, client_pool_size, 2),

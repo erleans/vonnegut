@@ -24,6 +24,7 @@ init_per_testcase(_, Config) ->
     Config.
 
 end_per_testcase(_, Config) ->
+    application:stop(vonnegut),
     application:unload(vonnegut),
     Config.
 

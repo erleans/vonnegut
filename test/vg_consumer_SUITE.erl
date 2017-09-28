@@ -4,10 +4,12 @@
 -include_lib("common_test/include/ct.hrl").
 -compile(export_all).
 
+-include("test_utils.hrl").
+
 all() ->
     [from_zero, multi_topic_fetch].
 
-init_per_testcase(_, Config) ->
+init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
     application:load(vonnegut),
     application:set_env(vonnegut, client_pool_size, 2),
@@ -15,28 +17,37 @@ init_per_testcase(_, Config) ->
     application:set_env(vonnegut, segment_bytes, 86),
     application:set_env(vonnegut, index_max_bytes, 18),
     application:set_env(vonnegut, index_interval_bytes, 24),
+    application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
     application:set_env(vonnegut, chain, [{discovery, local}]),
     application:start(shackle),
     application:ensure_all_started(vonnegut),
     crypto:start(),
     Config.
 
-end_per_testcase(_, Config) ->
+end_per_suite(Config) ->
+    application:stop(vonnegut),
     application:unload(vonnegut),
     Config.
 
+init_per_testcase(_, Config) ->
+    ok = vg_client_pool:start(#{reconnect => false}),
+    Config.
+
+end_per_testcase(_, _Config) ->
+    vg_client_pool:stop(),
+    ok.
+
 from_zero(_Config) ->
     Topic = vg_test_utils:create_random_name(<<"consumer_SUITE_test_topic">>),
+    {ok, _} = vg_client:ensure_topic(Topic),
     Partition = 0,
     TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
-    ok = vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
     %% make sure there's enough time for the
     %% listeners to come up
     timer:sleep(250),
 
-    ok = vg_client_pool:start(#{reconnect => false}),
     ?assertMatch({ok, 0},
                  vg_client:produce(Topic, [{<<"key">>, <<"record 1 wasn't long enough to make wrapping fail">>},
                                            <<"record 2">>])),
@@ -47,10 +58,11 @@ from_zero(_Config) ->
     {ok, #{Topic := #{0 := #{record_set := Data1, high_water_mark := HWM1}}}} = vg_client:fetch(Topic, 1),
     ?assertEqual(1, HWM1),
     ?assertMatch([#{id := 1, record := <<"record 2">>}], Data1),
-    vg_client_pool:stop(),
+
     ok.
 
 multi_topic_fetch(_Config) ->
+
     Topic1 = vg_test_utils:create_random_name(<<"consumer_SUITE_test_topic-1">>),
     Topic2 = vg_test_utils:create_random_name(<<"consumer_SUITE_test_topic-2">>),
 
@@ -61,7 +73,6 @@ multi_topic_fetch(_Config) ->
     %% listeners to come up
     timer:sleep(250),
 
-    ok = vg_client_pool:start(),
     ?assertMatch({ok, 0},
                  vg_client:produce(Topic1, [{<<"key">>, <<"topic 1 record 1">>},
                                             <<"topic 1 record 2">>])),
@@ -80,5 +91,4 @@ multi_topic_fetch(_Config) ->
     ?assertEqual(1, HWM2),
     ?assertMatch([#{id := 1, record := <<"topic 2 record 2">>}], Data2),
 
-    vg_client_pool:stop(),
     ok.

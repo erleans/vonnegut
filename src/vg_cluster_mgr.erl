@@ -61,7 +61,7 @@ init([ChainName, ChainNodes, DataDir]) ->
     Chain = create_chain(ChainName, ChainNodes),
     State = load_state([Chain], DataDir),
     self() ! {ensure_topics, ChainName},
-    {ok, State, 0}.
+    {ok, State}.
 
 handle_call(get_map, _From, State=#state{topics=Topics,
                                          chains=Chains,
