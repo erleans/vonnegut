@@ -18,6 +18,7 @@ ENV RELX_REPLACE_OS_VARS true
 ENV NODE 127.0.0.1
 ENV CHAIN_NAME chain1
 ENV REPLICAS 1
+ENV PEER_IP 127.0.0.1
 ENV DISCOVERY_DOMAIN local
 
 COPY --from=builder /opt/rel /opt/vonnegut
