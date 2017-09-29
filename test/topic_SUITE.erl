@@ -21,9 +21,10 @@ init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(vonnegut),
     Config.
 
-end_per_suite(Config) ->
+end_per_suite(_Config) ->
     application:stop(vonnegut),
-    Config.
+    application:unload(vonnegut),
+    ok.
 
 init_per_testcase(_, Config) ->
     ok = vg_client_pool:start(#{reconnect => false}),
@@ -31,10 +32,9 @@ init_per_testcase(_, Config) ->
     {ok, _} = vg_client:ensure_topic(Topic),
     [{topic, Topic} | Config].
 
-end_per_testcase(_, Config) ->
+end_per_testcase(_, _Config) ->
     vg_client_pool:stop(),
-    Config.
-
+    ok.
 
 creation(_Config) ->
     Topic = vg_test_utils:create_random_name(<<"creation_test_topic">>),

@@ -15,6 +15,7 @@ init_per_testcase(_, Config) ->
     application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
     application:set_env(vonnegut, segment_bytes, 86),
     application:set_env(vonnegut, index_max_bytes, 18),
+    application:set_env(vonnegut, log_cleaner, true),
     application:set_env(vonnegut, index_interval_bytes, 24),
     application:set_env(vonnegut, log_retention_minutes, 5),
     application:set_env(vonnegut, chain, [{discovery, local}]),
@@ -23,6 +24,7 @@ init_per_testcase(_, Config) ->
     Config.
 
 end_per_testcase(_, Config) ->
+    application:stop(vonnegut),
     application:unload(vonnegut),
     Config.
 

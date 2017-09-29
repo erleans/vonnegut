@@ -36,6 +36,7 @@ acceptor_init(_SockName, LSocket, []) ->
 
 acceptor_continue(_PeerName, Socket, MRef) ->
     lager:debug("new connection on ~p", [Socket]),
+    prometheus_gauge:inc(open_connections),
     case vg_chain_state:role() of
         middle ->
             lager:debug("at=new_connection error=client_middle node=~p peer=~p",
@@ -51,6 +52,7 @@ acceptor_continue(_PeerName, Socket, MRef) ->
 acceptor_terminate(Reason, _) ->
     % Something went wrong. Either the acceptor_pool is terminating or the
     % accept failed.
+    prometheus_gauge:dec(open_connections),
     exit(Reason).
 
 %% gen_server api
@@ -114,6 +116,7 @@ handle_data(Data, _Role, _Socket) ->
 handle_request(<<ApiKey:16/signed-integer, _ApiVersion:16/signed-integer, CorrelationId:32/signed-integer,
                  ClientIdSize:16/signed-integer, _ClientId:ClientIdSize/binary, Request/binary>>,
                Role, Socket) ->
+    prometheus_counter:inc(client_requests),
     handle_request(ApiKey, Role, Request, CorrelationId, Socket).
 
 handle_request(?METADATA_REQUEST, _, Data, CorrelationId, Socket) ->

@@ -57,6 +57,9 @@ init([]) ->
                          replicas=Replicas,
                          cluster_type=ClusterType}, [{state_timeout, 0, connect}]}.
 
+inactive(enter, _, _Data) ->
+    prometheus_boolean:set(is_active, false),
+    keep_state_and_data;
 inactive({call, From}, next_node, _Data) ->
     {keep_state_and_data, [{reply, From, undefined}]};
 inactive({call, From}, role, _Data) ->
@@ -116,6 +119,9 @@ inactive(info, {next_node_down, NextNode}, _Data) ->
     lager:info("state=inactive next_node_down=~p", [NextNode]),
     {keep_state_and_data, [{state_timeout, 0, connect}]}.
 
+active(enter, _, #data{role=Role, replicas=Replicas}) ->
+    set_metrics(Role, Replicas),
+    keep_state_and_data;
 active({call, From}, next_node, #data{next_node=NextNode}) ->
     {keep_state_and_data, [{reply, From, NextNode}]};
 active({call, From}, role, #data{role=Role}) ->
@@ -125,7 +131,7 @@ active(info, {next_node_down, NextNode}, Data) ->
     {next_state, inactive, Data, 0}.
 
 callback_mode() ->
-    state_functions.
+    [state_functions, state_enter].
 
 terminate(_Reason, _State, _Data) ->
     ok.
@@ -223,3 +229,22 @@ lookup({srv, DiscoveryDomain}) ->
                     ClientPort = rpc:call(Node, vg_config, port, []),
                     ordsets:add_element({?NODENAME, H, PartisanPort, ClientPort}, NodesAcc)
                 end, ordsets:new(), inet_res:lookup(DiscoveryDomain, in, srv)).
+
+set_metrics(Role, Replicas) ->
+    prometheus_boolean:set(is_active, true),
+    prometheus_gauge:set(replicas, Replicas),
+    RoleMetric = role_metric(Role),
+    [prometheus_boolean:set(B, false) || B <- [is_solo,
+                                               is_head,
+                                               is_tail,
+                                               is_middle], B =/= RoleMetric],
+    prometheus_boolean:set(RoleMetric, true).
+
+role_metric(solo) ->
+    is_solo;
+role_metric(head) ->
+    is_head;
+role_metric(tail) ->
+    is_tail;
+role_metric(middle) ->
+    is_middle.

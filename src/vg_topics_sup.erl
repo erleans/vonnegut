@@ -38,6 +38,7 @@ start_child(Server0, Topic, Partitions) ->
              end,
     lager:info("at=create_topic node=~p topic=~p partitions=~p target=~p",
                [node(), Topic, Partitions, Server0]),
+    prometheus_gauge:inc(active_topics),
     supervisor:start_child(Server, [Topic, Partitions]).
 
 %%====================================================================

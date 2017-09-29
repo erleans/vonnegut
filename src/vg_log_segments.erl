@@ -37,6 +37,7 @@ load_all(Topic, Partition) ->
     end.
 
 insert(Topic, Partition, SegmentId) ->
+    prometheus_gauge:inc(log_segments, [Topic]),
     ets:insert(?SEGMENTS_TABLE, {Topic, Partition, SegmentId}).
 
 local(Topic, Partition) ->

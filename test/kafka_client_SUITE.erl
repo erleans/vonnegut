@@ -31,6 +31,7 @@ init_per_suite(Config) ->
     [{host, Host}, {port, Port}, {hosts, Hosts} | Config].
 
 end_per_suite(Config) ->
+    application:stop(vonnegut),
     application:unload(vonnegut),
     Config.
 

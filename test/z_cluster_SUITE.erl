@@ -9,7 +9,6 @@ suite() ->
     [{timetrap,{minutes,30}}].
 
 init_per_suite(Config) ->
-    %application:ensure_all_started(lager),
     application:stop(partisan),
     application:stop(vonnegut),
     application:unload(vonnegut),
@@ -40,6 +39,7 @@ init_per_suite(Config) ->
                                        [{file, "console"++N++".log"}, {level, debug}]}]]},
                                    {application, ensure_all_started, [lager]},
                                    {application, load, [partisan]},
+                                   {application, set_env, [partisan, peer_ip, {127,0,0,1}]},
                                    {application, set_env, [partisan, peer_port, 15555+N0]},
                                    {application, set_env, [partisan, gossip_interval, 500]},
                                    {application, load, [vonnegut]},
@@ -49,7 +49,6 @@ init_per_suite(Config) ->
                                    {application, set_env,
                                     [vonnegut, log_dirs, ["data/node" ++ N ++ "/"]]},
                                    {application, ensure_all_started, [vonnegut]}]},
-                                 {env, [{"PEER_PORT", integer_to_list(15555+N0)}]},
                                  {erl_flags, ErlFlags}]),
              HostNode
          end
@@ -114,9 +113,6 @@ end_per_suite(Config) ->
     application:ensure_all_started(vonnegut),
     ok.
 
-init_per_group(_, Config) ->
-    Config.
-
 connect(Node, _Wait, 0) ->
     lager:error("could not connect to ~p, exiting", [Node]),
     exit(disterl);
@@ -129,8 +125,11 @@ connect(Node, Wait, Tries) ->
             connect(Node, Wait, Tries - 1)
     end.
 
-end_per_group(_GroupName, Config) ->
+init_per_group(_, Config) ->
     Config.
+
+end_per_group(_, _) ->
+    ok.
 
 init_per_testcase(_TestCase, Config) ->
     application:load(vonnegut),
@@ -148,6 +147,12 @@ init_per_testcase(_TestCase, Config) ->
             error(vg_cluster_mgr_timeout)
     end.
 
+end_per_testcase(_TestCase, Config) ->
+    application:unload(vonnegut),
+    vg_client_pool:stop(),
+    application:stop(shackle),
+    Config.
+
 wait_for_mgr() ->
     wait_for_mgr(0).
 
@@ -161,12 +166,6 @@ wait_for_mgr(N) ->
         _ ->
             ok
     end.
-
-end_per_testcase(_TestCase, Config) ->
-    application:unload(vonnegut),
-    vg_client_pool:stop(),
-    application:stop(shackle),
-    Config.
 
 groups() ->
     [
