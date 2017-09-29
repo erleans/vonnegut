@@ -70,87 +70,100 @@ fetch(Topic, Position, Limit) when is_binary(Topic) ->
     do_fetch([{Topic, Position, #{limit => Limit}}], ?TIMEOUT).
 
 do_fetch(Requests, Timeout) ->
-      try
-          PoolReqs =
-              lists:foldl(
-                fun({Topic, _Position, _Opts} = R, Acc) ->
-                        case vg_client_pool:get_pool(Topic, read) of
-                            {ok, Pool} ->
-                                lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
-                                case Acc of
-                                    #{Pool := PoolReqs} ->
-                                        Acc#{Pool => [R | PoolReqs]};
-                                    _ ->
-                                        Acc#{Pool => [R]}
-                                end;
-                            {error, not_found} ->
-                                throw({error, {Topic, not_found}})
-                        end
-                end, #{}, Requests),
-          %% should we do these in parallel?
-          Resps = maps:map(
-                    fun(Pool, TPO0) ->
-                            TPO = [begin
-                                       MaxBytes = maps:get(max_bytes, Opts, 0),
-                                       Limit = maps:get(limit, Opts, -1),
-                                       {Topic, [{0, Position, MaxBytes, Limit}]}
-                                   end
-                                   || {Topic, Position, Opts} <- TPO0],
-                            case shackle:call(Pool, {fetch2, TPO}, Timeout) of
-                                {ok, Result} ->
-                                    %% if there are any error codes in any
-                                    %% of these, transform the whole thing
-                                    %% into an error
-                                    {ok, Result};
-                                {error, Reason} ->
-                                    {error, Reason}
-                            end
-                    end, PoolReqs),
-          lists:foldl(
-            fun(_, {error, Response}) ->
-                    {error, Response};
-               ({_Pool, {ok, Response}}, {ok, Acc}) ->
-                    {ok, maps:merge(Acc, Response)};
-               ({_Pool, {error, Response}}, _) ->
-                    {error, Response}
-            end,
-            {ok, #{}}, maps:to_list(Resps))
-      catch throw:{error, {Topic, not_found}} ->
-              lager:error("tried to fetch from non-existent topic ~p", [Topic]),
-              {error, {Topic, not_found}}
-      end.
+    ocp:start_span(<<"vg_client:fetch">>),
+    try
+        PoolReqs =
+            lists:foldl(
+              fun({Topic, _Position, _Opts} = R, Acc) ->
+                      case vg_client_pool:get_pool(Topic, read) of
+                          {ok, Pool} ->
+                              lager:debug("fetch request to pool: ~p ~p", [Topic, Pool]),
+                              case Acc of
+                                  #{Pool := PoolReqs} ->
+                                      Acc#{Pool => [R | PoolReqs]};
+                                  _ ->
+                                      Acc#{Pool => [R]}
+                              end;
+                          {error, not_found} ->
+                              throw({error, {Topic, not_found}})
+                      end
+              end, #{}, Requests),
+        %% should we do these in parallel?
+        Resps = maps:map(
+                  fun(Pool, TPO0) ->
+                          TPO = [begin
+                                     MaxBytes = maps:get(max_bytes, Opts, 0),
+                                     Limit = maps:get(limit, Opts, -1),
+                                     {Topic, [{0, Position, MaxBytes, Limit}]}
+                                 end
+                                 || {Topic, Position, Opts} <- TPO0],
+                          case shackle:call(Pool, {fetch2, TPO}, Timeout) of
+                              {ok, Result} ->
+                                  %% if there are any error codes in any
+                                  %% of these, transform the whole thing
+                                  %% into an error
+                                  {ok, Result};
+                              {error, Reason} ->
+                                  {error, Reason}
+                          end
+                  end, PoolReqs),
+        lists:foldl(
+          fun(_, {error, Response}) ->
+                  {error, Response};
+             ({_Pool, {ok, Response}}, {ok, Acc}) ->
+                  {ok, maps:merge(Acc, Response)};
+             ({_Pool, {error, Response}}, _) ->
+                  {error, Response}
+          end,
+          {ok, #{}}, maps:to_list(Resps))
+    catch throw:{error, {Topic, not_found}} ->
+            lager:error("tried to fetch from non-existent topic ~p", [Topic]),
+            {error, {Topic, not_found}}
+    after
+        ocp:finish_span()
+    end.
 
 -spec produce(Topic, RecordSet)
              -> {ok, integer()} | {error, term()}
                     when Topic :: vg:topic(),
                          RecordSet :: vg:record_set().
 produce(Topic, RecordSet) ->
-    case vg_client_pool:get_pool(Topic, write) of
-        {ok, Pool} ->
-            lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
-            TopicRecords = [{Topic, [{0, RecordSet}]}],
-            case shackle:call(Pool, {produce, TopicRecords}, ?TIMEOUT) of
-                {ok, #{Topic := #{0 := #{error_code := 0,
-                                         offset := Offset}}}} ->
-                    {ok, Offset};
-                {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
-                    {error, ErrorCode};
-                {error, Reason} ->
-                    {error, Reason}
-            end;
-        {error, Reason} ->
-            {error, Reason}
+    ocp:start_span(<<"vg_client:produce">>),
+    try
+        case vg_client_pool:get_pool(Topic, write) of
+            {ok, Pool} ->
+                lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
+                TopicRecords = [{Topic, [{0, RecordSet}]}],
+                case shackle:call(Pool, {produce, TopicRecords}, ?TIMEOUT) of
+                    {ok, #{Topic := #{0 := #{error_code := 0,
+                                             offset := Offset}}}} ->
+                        {ok, Offset};
+                    {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
+                        {error, ErrorCode};
+                    {error, Reason} ->
+                        {error, Reason}
+                end;
+            {error, Reason} ->
+                {error, Reason}
+        end
+    after
+        ocp:finish_span()
     end.
 
 topics() ->
     topics(metadata, []).
 
 topics(Pool, Topic) ->
-    case shackle:call(Pool,  {topics, Topic}, ?TIMEOUT) of
-        {ok, {_, _}} = OK ->
-            OK;
-        {error, Reason} ->
-            {error, Reason}
+    ocp:start_span(<<"vg_client:topics">>),
+    try
+        case shackle:call(Pool,  {topics, Topic}, ?TIMEOUT) of
+            {ok, {_, _}} = OK ->
+                OK;
+            {error, Reason} ->
+                {error, Reason}
+        end
+    after
+        ocp:finish_span()
     end.
 
 -spec init() -> {ok, term()}.
