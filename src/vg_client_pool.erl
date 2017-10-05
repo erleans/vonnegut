@@ -131,7 +131,7 @@ start_pool(Name, Opts) ->
                         {port, maps:get(port, Opts, 5555)},
                         {reconnect, maps:get(reconnect, Opts, true)},
                         {reconnect_time_max, 120000},
-                        {reconnect_time_min, none},
+                        {reconnect_time_min, 250},
                         {socket_options, SocketOpts}],
                        [{backlog_size, 1024},
                         {pool_size, ClientPoolSize},
