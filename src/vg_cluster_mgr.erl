@@ -154,7 +154,11 @@ ensure_topic(ChainName, Topic, State=#state{topics=Topics,
                     {{error, chain_not_found}, State};
                 #chain{nodes=Nodes} ->
                     %% start topic process on all nodes in the chain
-                    [{ok, _} = vg_topics_sup:start_child(Node, Topic, [0]) || Node <- Nodes],
+                    [case vg_topics_sup:start_child(Node, Topic, [0]) of
+                         {ok, _} -> ok;
+                         {error,{already_started, _}} -> ok;
+                         {error, Reason} -> exit({error, Reason})
+                     end || Node <- Nodes],
 
                     Topics1 = maps:put(Topic, ChainName, Topics),
                     {ok, State#state{topics=Topics1,
