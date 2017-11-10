@@ -5,7 +5,8 @@
 -compile(export_all).
 
 all() ->
-    [creation, write_empty, write, index_bug, limit, index_limit, many].
+    [creation, write_empty, write, index_bug, limit, index_limit,
+     startup_index_correctness, many].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -187,3 +188,53 @@ many(Config) ->
     ct:pal("creating ~p topics took ~p ms", [TopicCount, Duration]),
     ?assert(Duration < TimeLimit),
     Config.
+
+wait_for_start(Topic) ->
+    wait_for_start(Topic, 5000).
+
+wait_for_start(_Topic, 0) ->
+    error(waited_too_long);
+wait_for_start(Topic, N) ->
+    case vg_client:fetch(Topic, 0, 1) of
+        {ok, _} = _OK ->
+            %%ct:pal("ok ~p", [_OK]),
+            timer:sleep(150),
+            ok;
+        {error, no_socket} ->
+            timer:sleep(1),
+            wait_for_start(Topic, N - 1)
+    end.
+
+startup_index_correctness(Config) ->
+    %% we actually want the reconnect behavior here
+    ok = vg_client_pool:stop(),
+    ok = vg_client_pool:start(#{reconnect => true}),
+
+    Topic = ?config(topic, Config),
+    ct:pal("STARTING TEST"),
+
+    {ok, _} = vg_client:produce(Topic,
+                                lists:duplicate(1, <<"123456789abcdef">>)),
+    {ok, _} = vg_client:produce(Topic,
+                                lists:duplicate(1, <<"123456789abcdef">>)),
+
+
+    [begin
+         application:stop(vonnegut),
+         {ok, _} = application:ensure_all_started(vonnegut),
+         wait_for_start(Topic),
+         {ok, _} = vg_client:produce(Topic, <<"123456789abcdef">>),
+         {ok, _} = vg_client:produce(Topic, <<"123456789abcdef">>)
+     end
+     || _ <- lists:seq(1, 4)],
+
+    %% -1 Offset returns HWM-Limit to HWM
+    {ok, #{Topic := #{0 := #{record_set := Reply0}}}} = vg_client:fetch([{Topic, -1, #{limit => 2}}]),
+    ?assertEqual(2, length(Reply0)),
+    ?assertMatch(#{id := 8}, hd(Reply0)),
+    ?assertMatch(#{id := 9}, hd(lists:reverse(Reply0))),
+
+    {ok, #{Topic := #{0 := #{record_set := Reply1}}}} = vg_client:fetch([{Topic, 0, #{limit => 100}}]),
+    ?assertEqual(10, length(Reply1)),
+    ?assertMatch(#{id := 9}, hd(lists:reverse(Reply1))),
+    ok.

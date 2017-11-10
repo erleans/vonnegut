@@ -147,7 +147,8 @@ find_latest_id(TopicDir, Topic, Partition) ->
     LogSegmentFilename = vg_utils:log_file(TopicDir, SegmentId),
     {ok, Log} = vg_utils:open_read(LogSegmentFilename),
     try
-        NewId = find_last_log(Log, Offset, file:pread(Log, Position, 16)),
+        file:position(Log, Position),
+        NewId = find_last_log(Log, Offset, file:read(Log, 12)),
         {NewId+SegmentId, IndexFilename, LogSegmentFilename}
     after
         file:close(Log)
@@ -192,10 +193,10 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
 %% Find the Id for the last log in the log file Log
 find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
     case file:read(Log, Size + 12) of
-        {ok, <<_:Size/binary, Data:12/binary>>} ->
+        {ok, <<_:Size/bytes, Data:12/bytes>>} ->
             find_last_log(Log, NewId, {ok, Data});
         _ ->
-            NewId+1
+            NewId + 1
     end;
 find_last_log(_Log, Id, _) ->
     Id.

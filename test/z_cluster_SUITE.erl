@@ -34,7 +34,7 @@ init_per_suite(Config) ->
                                    {application, load, [lager]},
                                    {application, set_env,
                                     [lager, handlers,
-                                     [{lager_console_backend, [info]},
+                                     [{lager_console_backend, [{level, info}]},
                                       {lager_file_backend,
                                        [{file, "console"++N++".log"}, {level, debug}]}]]},
                                    {application, ensure_all_started, [lager]},
