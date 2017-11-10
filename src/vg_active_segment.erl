@@ -34,8 +34,12 @@
                 config      :: #config{}
                }).
 
--define(NEW_SERVER(Topic, Partition), binary_to_atom(<<Topic/binary, $-, Partition>>, latin1)).
--define(SERVER(Topic, Partition), binary_to_existing_atom(<<Topic/binary, $-, Partition>>, latin1)).
+-define(NEW_SERVER(Topic, Partition),
+        binary_to_atom(<<Topic/binary, $-,
+                         (integer_to_binary(Partition))/binary>>, latin1)).
+-define(SERVER(Topic, Partition),
+        binary_to_existing_atom(<<Topic/binary, $-,
+                                  (integer_to_binary(Partition))/binary>>, latin1)).
 
 start_link(Topic, Partition, NextBrick) ->
     %% worth the trouble of making sure we have no acks table on tails?
@@ -89,7 +93,7 @@ init([Topic, Partition, NextNode, Tab]) ->
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
-    vg_topics:update_hwm(Topic, Partition, Id-1),
+    vg_topics:update_hwm(Topic, Partition, Id - 1),
     {ok, #state{id=Id,
                 next_brick={?SERVER(Topic, Partition), NextNode},
                 topic_dir=TopicDir,
@@ -203,6 +207,8 @@ maybe_roll(Size, State=#state{id=Id,
     lager:debug("seg size ~p max size ~p", [Position+Size, SegmentBytes]),
     lager:debug("index interval size ~p max size ~p", [ByteCount+Size, IndexIntervalBytes]),
     lager:debug("index pos ~p max size ~p", [IndexPosition+6, IndexMaxBytes]),
+    ok = file:sync(LogFile),
+    ok = file:sync(IndexFile),
     ok = file:close(LogFile),
     ok = file:close(IndexFile),
 

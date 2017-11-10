@@ -6,7 +6,7 @@
          ensure_topic/1,
          topics/0, topics/2,
          fetch/1, fetch/2, fetch/3,
-         produce/2,
+         produce/2, produce/3,
          init/0,
          setup/2,
          handle_request/2,
@@ -128,13 +128,21 @@ do_fetch(Requests, Timeout) ->
                     when Topic :: vg:topic(),
                          RecordSet :: vg:record_set().
 produce(Topic, RecordSet) ->
+    produce(Topic, RecordSet, ?TIMEOUT).
+
+-spec produce(Topic, RecordSet, Timeout)
+             -> {ok, integer()} | {error, term()}
+                    when Topic :: vg:topic(),
+                         RecordSet :: vg:record_set(),
+                         Timeout :: pos_integer().
+produce(Topic, RecordSet, Timeout) ->
     ocp:start_span(<<"vg_client:produce">>),
     try
         case vg_client_pool:get_pool(Topic, write) of
             {ok, Pool} ->
                 lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
                 TopicRecords = [{Topic, [{0, RecordSet}]}],
-                case shackle:call(Pool, {produce, TopicRecords}, ?TIMEOUT) of
+                case shackle:call(Pool, {produce, TopicRecords}, Timeout) of
                     {ok, #{Topic := #{0 := #{error_code := 0,
                                              offset := Offset}}}} ->
                         {ok, Offset};
