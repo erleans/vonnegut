@@ -1,6 +1,6 @@
 -name vonnegut@${NODE}
 
--setcookie vonnegut
+-setcookie ${COOKIE}
 
 +A 100
 +K true
