@@ -205,7 +205,6 @@ handle_request(FetchType, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/
                           {S, R} = fetch(Topic, Partitions),
                           {S + SizeAcc, ResponseAcc ++ R}
                       end, {4, [<<(length(TopicPartitions)):32/signed-integer>>]}, TopicPartitions),
-
     gen_tcp:send(Socket, <<(Size+4):32/signed-integer, CorrelationId:32/signed-integer>>),
     do_send(FetchResults, Socket);
 handle_request(?FETCH_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
@@ -356,7 +355,8 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
 
         lager:debug("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
         {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}
-    catch _:_ ->
+    catch Type:Exception ->
+            lager:error("type=~p exception=~p stacktrace=~p", [Type, Exception, erlang:get_stacktrace()]),
             %% we should just crash here, otherwise we risk sending a
             %% malformed response.
             error(crashed_while_fetching)

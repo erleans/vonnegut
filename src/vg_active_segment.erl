@@ -58,7 +58,7 @@ write(Topic, Partition, RecordSet) ->
         gen_server:call(?SERVER(Topic, Partition), {write, RecordSet})
     catch _:{noproc, _} ->
             lager:warning("write to nonexistent topic '~s', creating", [Topic]),
-            {ok, _} = vg_topics_sup:start_child(Topic),
+            {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
             write(Topic, Partition, RecordSet)
     end.
 
@@ -70,7 +70,7 @@ write(Sender, Topic, Partition, RecordSet) ->
         gen_server:call(?SERVER(Topic, Partition), {write, Sender, RecordSet})
     catch _:{noproc, _} ->
             lager:warning("sender write to nonexistent topic '~s', creating", [Topic]),
-            {ok, _} = vg_topics_sup:start_child(Topic),
+            {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
             write(Sender, Topic, Partition, RecordSet)
     end.
 
@@ -94,6 +94,7 @@ init([Topic, Partition, NextNode, Tab]) ->
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
     vg_topics:update_hwm(Topic, Partition, Id - 1),
+
     {ok, #state{id=Id,
                 next_brick={?SERVER(Topic, Partition), NextNode},
                 topic_dir=TopicDir,
