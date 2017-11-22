@@ -247,7 +247,7 @@ handle_request({topics, Topics}, #state {
      State#state{corids = maps:put(RequestId, ?TOPICS_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}}.
 
--spec handle_data(binary(), term()) -> {ok, term(), term()}.
+-spec handle_data(binary(), term()) -> {ok, [{term(),term()}], term()}.
 handle_data(Data, State=#state{buffer=Buffer}) ->
     Data2 = <<Buffer/binary, Data/binary>>,
     decode_data(Data2, [], State).
