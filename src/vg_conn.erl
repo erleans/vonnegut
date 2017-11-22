@@ -42,6 +42,8 @@ acceptor_continue(_PeerName, Socket, MRef) ->
             lager:debug("at=new_connection error=client_middle node=~p peer=~p",
                         [node(), _PeerName]),
             {error, no_valid_client_operations};
+        unknown ->
+            {error, chain_state_uninitialized};
         Role ->
             lager:debug("at=new_connection node=~p role=~p peer=~p",
                         [node(), Role, _PeerName]),
@@ -355,7 +357,9 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
         lager:debug("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
         {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}
     catch _:_ ->
-            {0, <<>>, noop}  %% is this the safe? TODO: add test
+            %% we should just crash here, otherwise we risk sending a
+            %% malformed response.
+            error(crashed_while_fetching)
     after
         file:close(Fd)
     end.

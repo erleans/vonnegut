@@ -69,8 +69,11 @@ inactive(state_timeout, connect, Data=#data{name=Name,
                                             cluster_type=ClusterType}) ->
     {Members, AllNodes} = join(ClusterType),
     lager:info("cluster_type=~p members=~p all_nodes=~p", [ClusterType, Members, AllNodes]),
-    case role(node(), Members, Replicas, ClusterType) of
-        solo ->
+    case {whereis(vg_topics_sup), role(node(), Members, Replicas, ClusterType)} of
+        {undefined, _} ->
+            {keep_state, Data#data{members=Members,
+                                   role=undefined}, [{state_timeout, 1000, connect}]};
+        {_P, solo} when is_pid(_P) ->
             lager:info("at=chain_complete role=solo requested_size=1", []),
             lager:info("at=start_cluster_mgr role=solo"),
             ClientPort = vg_config:port(),
@@ -81,10 +84,10 @@ inactive(state_timeout, connect, Data=#data{name=Name,
                                            role=solo,
                                            all_nodes=[],
                                            next_node=tail}};
-        undefined ->
+        {_P, undefined} when is_pid(_P) ->
             {keep_state, Data#data{members=Members,
                                    role=undefined}, [{state_timeout, 1000, connect}]};
-        Role ->
+        {_P, Role} when is_pid(_P) ->
             lager:info("at=chain_join role=~s members=~p", [Role, Members]),
             case length(Members) of
                 Size when Size >= Replicas ->
