@@ -19,44 +19,46 @@ init_per_suite(Config) ->
     ErlFlags = "-config ../../../../cluster/sys.config",
 
     CodePath = code:get_path(),
-    Nodes =
+    Nodes0 =
         [begin
              N = integer_to_list(N0),
              Name = test_node(N),
-             {ok, HostNode} = ct_slave:start(
-                                Name,
-                                [{kill_if_fail, true},
-                                 {monitor_master, true},
-                                 {init_timeout, 3000},
-                                 {startup_timeout, 3000},
-                                 {startup_functions,
-                                  [{code, set_path, [CodePath]},
-                                   {application, load, [lager]},
-                                   {application, set_env,
-                                    [lager, handlers,
-                                     [{lager_console_backend, [{level, info}]},
-                                      {lager_file_backend,
-                                       [{file, "console"++N++".log"}, {level, debug}]}]]},
-                                   {application, ensure_all_started, [lager]},
-                                   {application, load, [partisan]},
-                                   {application, set_env, [partisan, peer_ip, {127,0,0,1}]},
-                                   {application, set_env, [partisan, peer_port, 15555+N0]},
-                                   {application, set_env, [partisan, gossip_interval, 500]},
-                                   {application, load, [vonnegut]},
-                                   {application, set_env, [vonnegut, chain, chain(5555+N0)]},
-                                   {application, set_env, [vonnegut, client_pool_size, 2]},
-                                   {application, set_env, [vonnegut, http_port, 8000+N0]},
-                                   {application, set_env,
-                                    [vonnegut, log_dirs, ["data/node" ++ N ++ "/"]]},
-                                   {application, ensure_all_started, [vonnegut]}]},
-                                 {erl_flags, ErlFlags}]),
-             HostNode
+             Args = [{kill_if_fail, true},
+                     {monitor_master, true},
+                     {init_timeout, 3000},
+                     {startup_timeout, 3000},
+                     {startup_functions,
+                      [{code, set_path, [CodePath]},
+                       {application, load, [lager]},
+                       {application, set_env,
+                        [lager, handlers,
+                         [{lager_console_backend, [{level, debug}]},
+                          {lager_file_backend,
+                           [{file, "console"++N++".log"}, {level, debug}]}]]},
+                       {application, ensure_all_started, [lager]},
+                       {application, load, [partisan]},
+                       {application, set_env, [partisan, peer_ip, {127,0,0,1}]},
+                       {application, set_env, [partisan, peer_port, 15555+N0]},
+                       {application, set_env, [partisan, gossip_interval, 500]},
+                       {application, load, [vonnegut]},
+                       {application, set_env, [vonnegut, chain, chain(5555+N0)]},
+                       {application, set_env, [vonnegut, client_pool_size, 2]},
+                       {application, set_env, [vonnegut, http_port, 8000+N0]},
+                       {application, set_env,
+                        [vonnegut, log_dirs, ["data/node" ++ N ++ "/"]]},
+                       {application, ensure_all_started, [vonnegut]}]},
+                     {erl_flags, ErlFlags}],
+             {ok, HostNode} = ct_slave:start(Name, Args),
+             {HostNode, {Name, Args}}
          end
          || N0 <- lists:seq(0, 2)],
+    {Nodes, RestartInfos} = lists:unzip(Nodes0),
     wait_for_nodes(Nodes, 50), % wait a max of 5s
     timer:sleep(5000),
     swap_lager(Nodes),
-    [{nodes, Nodes} | Config].
+    [{nodes, Nodes},
+     {restart, RestartInfos}
+     | Config].
 
 wait_for_nodes(_Nodes, 0) ->
     error(too_slow);
@@ -179,7 +181,9 @@ groups() ->
       [
        roles,
        acks,
-       concurrent_fetch
+       concurrent_fetch,
+       restart%,
+       %restart_slow
       ]}
 
     ].
@@ -273,8 +277,67 @@ concurrent_fetch(_Config) ->
             throw(timeout)
     end.
 
+restart(Config) ->
+    %% restart to get reconnection behavior
+    ok = vg_client_pool:stop(),
+    ok = vg_client_pool:start(),
+    Nodes = ?config(nodes, Config),
+    Restarts = ?config(restart, Config),
 
-%% to run this test: rebar3 ct --dir=cluster --sys_config=cluster/sys.config --suite=cluster_SUITE --case=concurrent_perf
+    ct:pal("nodes ~p", [Nodes]),
+    [begin
+         %% make a lot of topics and add a few things to them to delay restart
+         Topic = <<"bar", (integer_to_binary(N))/binary>>,
+         {ok, _} = vg_client:ensure_topic(Topic),
+         vg_client:produce(Topic, [<<"baz", (integer_to_binary(T))/binary>>
+                                       || T <- lists:seq(1, 50)])
+     end
+     || N <- lists:seq(1, 20)],
+
+    ct:pal("nodes() ~p", [nodes()]),
+    [begin
+         ?assertMatch({ok, _}, ct_slave:stop(Node))
+     end
+     || Node <- Nodes],
+    ct:pal("nodes() ~p", [nodes()]),
+    timer:sleep(1000),
+    Nodes1 =
+        [begin
+             {ok, Node} = ct_slave:start(Name, Args),
+             Node
+         end
+         || {Name, Args} <- Restarts],
+    swap_lager(Nodes1),
+    wait_for_nodes(Nodes1, 50), % wait a max of 5s
+    timer:sleep(2000),
+    ok = wait_for_start(<<"bar4">>),
+
+    {ok, Result} = vg_client:fetch(<<"bar4">>, 0, 1000),
+    ?assertMatch(#{<<"bar4">> := #{0 := #{high_water_mark := 49}}},
+                 Result),
+
+    Config.
+
+wait_for_start(Topic) ->
+    wait_for_start(Topic, 5000).
+
+wait_for_start(_Topic, 0) ->
+    error(waited_too_long);
+wait_for_start(Topic, N) ->
+    case vg_client:fetch(Topic, 0, 1) of
+        {ok, _} = _OK ->
+            %%ct:pal("ok ~p", [_OK]),
+            timer:sleep(150),
+            ok;
+        {error, E} when E =:= no_socket orelse
+                        E =:= pool_timeout ->
+            timer:sleep(1),
+            wait_for_start(Topic, N - 1)
+    end.
+
+
+
+%% to run this test: rebar3 ct --suite=z_cluster_SUITE --case=concurrent_perf
 concurrent_perf(_Config) ->
     Topic1 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf1">>),
     Topic2 = vg_test_utils:create_random_name(<<"cluster_concurrent_perf2">>),

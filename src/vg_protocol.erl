@@ -228,8 +228,8 @@ decode_produce_partitions_request(<<Partition:32/signed-integer, Size:32/signed-
 decode_response(<<Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
     <<CorrelationId:32/signed-integer, Response/binary>> = Record,
     {CorrelationId, Response, Rest};
-decode_response(<<Size:32/signed-integer, _/binary>>) ->
-    {more, Size};
+decode_response(<<Size:32/signed-integer, Rest/binary>>) ->
+    {more, Size - byte_size(Rest)};
 decode_response(_) ->
     more.
 

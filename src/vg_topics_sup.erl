@@ -32,6 +32,12 @@ start_child(Topic, Partitions) ->
     start_child(local, Topic, Partitions).
 
 start_child(Server0, Topic, Partitions) ->
+    %% since it's crucial to start remote children, block for a while
+    start_child(Server0, Topic, Partitions, 300).
+
+start_child(_, _, _, 0) ->
+    {error, remote_node_down};
+start_child(Server0, Topic, Partitions, Retries) ->
     Server = case Server0 of
                  local -> ?SERVER;
                  _ -> {?SERVER, Server0}
@@ -39,7 +45,12 @@ start_child(Server0, Topic, Partitions) ->
     lager:info("at=create_topic node=~p topic=~p partitions=~p target=~p",
                [node(), Topic, Partitions, Server0]),
     prometheus_gauge:inc(active_topics),
-    supervisor:start_child(Server, [Topic, Partitions]).
+    try
+        supervisor:start_child(Server, [Topic, Partitions])
+    catch _:_ ->
+            timer:sleep(100),
+            start_child(Server0, Topic, Partitions, Retries - 1)
+    end.
 
 %%====================================================================
 %% Supervisor callbacks

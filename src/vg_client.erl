@@ -1,6 +1,6 @@
 -module(vg_client).
 
-%%-behavior(shackle_client). ?
+-behavior(shackle_client).
 
 -export([metadata/0, metadata/1,
          ensure_topic/1,
@@ -32,7 +32,7 @@ metadata() ->
     metadata([]).
 
 metadata(Topics) ->
-    shackle:call(metadata, {metadata, Topics}).
+    scall(fun() -> shackle:call(metadata, {metadata, Topics}) end).
 
 -spec ensure_topic(Topic :: vg:topic()) ->
                           {ok, {Chains :: vg_cluster_mgr:chains_map(),
@@ -40,7 +40,7 @@ metadata(Topics) ->
                           {error, Reason :: term()}.
 ensure_topic(Topic) ->
     %% always use the metadata topic, creation happens inside via a global process.
-    shackle:call(metadata, {ensure, [Topic]}, ?TIMEOUT).
+    scall(fun() -> shackle:call(metadata, {ensure, [Topic]}, ?TIMEOUT) end).
 
 
 -spec fetch(Topic)
@@ -97,7 +97,7 @@ do_fetch(Requests, Timeout) ->
                                      {Topic, [{0, Position, MaxBytes, Limit}]}
                                  end
                                  || {Topic, Position, Opts} <- TPO0],
-                          case shackle:call(Pool, {fetch2, TPO}, Timeout) of
+                          case scall(fun() -> shackle:call(Pool, {fetch2, TPO}, Timeout) end) of
                               {ok, Result} ->
                                   %% if there are any error codes in any
                                   %% of these, transform the whole thing
@@ -142,7 +142,7 @@ produce(Topic, RecordSet, Timeout) ->
             {ok, Pool} ->
                 lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
                 TopicRecords = [{Topic, [{0, RecordSet}]}],
-                case shackle:call(Pool, {produce, TopicRecords}, Timeout) of
+                case scall(fun() -> shackle:call(Pool, {produce, TopicRecords}, Timeout) end) of
                     {ok, #{Topic := #{0 := #{error_code := 0,
                                              offset := Offset}}}} ->
                         {ok, Offset};
@@ -164,7 +164,7 @@ topics() ->
 topics(Pool, Topic) ->
     ocp:start_span(<<"vg_client:topics">>),
     try
-        case shackle:call(Pool,  {topics, Topic}, ?TIMEOUT) of
+        case scall(fun() -> shackle:call(Pool,  {topics, Topic}, ?TIMEOUT) end) of
             {ok, {_, _}} = OK ->
                 OK;
             {error, Reason} ->
@@ -247,7 +247,7 @@ handle_request({topics, Topics}, #state {
      State#state{corids = maps:put(RequestId, ?TOPICS_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}}.
 
--spec handle_data(binary(), term()) -> {ok, term(), term()}.
+-spec handle_data(binary(), term()) -> {ok, [{term(),term()}], term()}.
 handle_data(Data, State=#state{buffer=Buffer}) ->
     Data2 = <<Buffer/binary, Data/binary>>,
     decode_data(Data2, [], State).
@@ -280,3 +280,21 @@ terminate(_State) ->
 %% private
 request_id(RequestCounter) ->
     RequestCounter rem ?MAX_REQUEST_ID.
+
+scall(Thunk) ->
+    B = backoff:init(2, 200),
+    B1 = backoff:type(B, jitter),
+    %% at these settings, 25 retries is approximately 5s
+    scall(Thunk, B1, 25).
+
+scall(_, _, 0) ->
+    {error, pool_timeout};
+scall(Thunk, B, Retries) ->
+    case Thunk() of
+        {error, no_socket} ->
+            {Time, B1} = backoff:fail(B),
+            timer:sleep(Time),
+            scall(Thunk, B1, Retries - 1);
+        Res ->
+            Res
+    end.
