@@ -44,7 +44,8 @@
 start_link(Topic, Partition, NextBrick) ->
     %% worth the trouble of making sure we have no acks table on tails?
     Tab = vg_pending_writes:ensure_tab(Topic, Partition),
-    gen_server:start_link({local, ?NEW_SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab], []).
+    gen_server:start_link({local, ?NEW_SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab],
+                          [{hibernate_after, 300000}]). %% hibernate after 5 minutes with no messages
 
 -spec write(Topic, Partition, RecordSet) -> {ok, Offset} | {error, any()} when
       Topic :: binary(),
