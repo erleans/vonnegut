@@ -102,13 +102,7 @@ handle_call({ensure_topic, Topic}, _From, State=#state{topics=Topics,
             {reply, {ok, Chain}, State#state{topics=Topics1,
                                              epoch=Epoch+1}};
         Chain ->
-            #chain{nodes=Nodes} = maps:get(Chain, Chains),
-            [case vg_topics_sup:start_child(Node, Topic, [0]) of
-                 {ok, _} -> ok;
-                 {error,{already_started, _}} -> ok;
-                 {error, Reason} -> exit({error, Reason})
-             end || Node <- Nodes],
-
+            start_on_all_nodes(Topic, Chain, Chains),
             {reply, {ok, Chain}, State}
     end.
 
