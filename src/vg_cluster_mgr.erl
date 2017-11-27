@@ -53,7 +53,7 @@ create_topic(Topic) ->
 
 -spec ensure_topic(Topic :: binary()) -> {error, chain_not_found} |
                                          {error, topic_exists_other_chain} |
-                                         ok.
+                                         {ok, chain_id()}.
 ensure_topic(Topic) ->
     gen_server:call({global, ?SERVER}, {ensure_topic, Topic}).
 

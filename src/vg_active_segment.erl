@@ -34,6 +34,9 @@
                 config      :: #config{}
                }).
 
+%% need this until an Erlang release with `hibernate_after` spec added to gen option type
+-dialyzer({nowarn_function, start_link/3}).
+
 -define(NEW_SERVER(Topic, Partition),
         binary_to_atom(<<Topic/binary, $-,
                          (integer_to_binary(Partition))/binary>>, latin1)).
