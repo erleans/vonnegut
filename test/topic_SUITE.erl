@@ -6,7 +6,7 @@
 
 all() ->
     [creation, write_empty, write, index_bug, limit, index_limit,
-     startup_index_correctness, many].
+     startup_index_correctness, many, verify_lazy_load].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -173,7 +173,7 @@ index_limit(Config) ->
 
 many(Config) ->
     TopicCount = 1000,
-    TimeLimit = 10000,
+    TimeLimit = 100000,
 
     Start = erlang:monotonic_time(milli_seconds),
     [begin
@@ -238,3 +238,40 @@ startup_index_correctness(Config) ->
     ?assertEqual(10, length(Reply1)),
     ?assertMatch(#{id := 9}, hd(lists:reverse(Reply1))),
     ok.
+
+%% verify the active topic segment process is not started until needed
+verify_lazy_load(_Config) ->
+    Topic = vg_test_utils:create_random_name(<<"verify_lazy_load">>),
+    Partition = 0,
+    TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
+    vg:create_topic(Topic),
+    ?assert(filelib:is_dir(TopicPartitionDir)),
+
+    {ok, _}  = vg_client:produce(Topic,
+                                 lists:duplicate(100, <<"123456789abcdef">>)),
+
+    %% fetch from 0 to make sure that they're all there
+    {ok, #{Topic := #{0 := #{record_set := Reply}}}} = vg_client:fetch(Topic, 0),
+    ?assertEqual(100, length(Reply)),
+
+    application:stop(vonnegut),
+
+    %% delay on getting the elli port back can cause restarting to fail so pause for a bit
+    timer:sleep(500),
+
+    {ok, _} = application:ensure_all_started(vonnegut),
+    wait_for_start(Topic),
+
+    Name = binary_to_atom(<<Topic/binary, $-, (integer_to_binary(Partition))/binary>>, latin1),
+    ?assertEqual(undefined, erlang:whereis(Name)),
+
+    {ok, #{Topic := #{0 := #{record_set := Reply2}}}} = vg_client:fetch(Topic, 0),
+    ?assertEqual(100, length(Reply2)),
+
+    ?assertEqual(undefined, erlang:whereis(Name)),
+
+    %% writing starts the process
+    {ok, _}  = vg_client:produce(Topic,
+                                 lists:duplicate(100, <<"123456789abcdef">>)),
+
+    ?assertNotEqual(undefined, erlang:whereis(Name)).

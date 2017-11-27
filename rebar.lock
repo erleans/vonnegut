@@ -23,7 +23,7 @@
   0},
  {<<"opencensus">>,
   {git,"https://github.com/census-instrumentation/opencensus-erlang.git",
-       {ref,"b8fecf303896a9bdbfe9d1f83371a5bc1e88a28a"}},
+       {ref,"d40e9e9de52552cdada864656fe48cd38c26c92e"}},
   0},
  {<<"partisan">>,{pkg,<<"partisan">>,<<"1.0.2">>},0},
  {<<"prometheus">>,{pkg,<<"prometheus">>,<<"3.4.1">>},0},

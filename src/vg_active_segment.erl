@@ -34,6 +34,9 @@
                 config      :: #config{}
                }).
 
+%% need this until an Erlang release with `hibernate_after` spec added to gen option type
+-dialyzer({nowarn_function, start_link/3}).
+
 -define(NEW_SERVER(Topic, Partition),
         binary_to_atom(<<Topic/binary, $-,
                          (integer_to_binary(Partition))/binary>>, latin1)).
@@ -44,7 +47,8 @@
 start_link(Topic, Partition, NextBrick) ->
     %% worth the trouble of making sure we have no acks table on tails?
     Tab = vg_pending_writes:ensure_tab(Topic, Partition),
-    gen_server:start_link({local, ?NEW_SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab], []).
+    gen_server:start_link({local, ?NEW_SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab],
+                          [{hibernate_after, timer:minutes(5)}]). %% hibernate after 5 minutes with no messages
 
 -spec write(Topic, Partition, RecordSet) -> {ok, Offset} | {error, any()} when
       Topic :: binary(),
@@ -58,7 +62,7 @@ write(Topic, Partition, RecordSet) ->
         gen_server:call(?SERVER(Topic, Partition), {write, RecordSet})
     catch _:{noproc, _} ->
             lager:warning("write to nonexistent topic '~s', creating", [Topic]),
-            {ok, _} = vg_topics_sup:start_child(Topic),
+            {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
             write(Topic, Partition, RecordSet)
     end.
 
@@ -70,7 +74,7 @@ write(Sender, Topic, Partition, RecordSet) ->
         gen_server:call(?SERVER(Topic, Partition), {write, Sender, RecordSet})
     catch _:{noproc, _} ->
             lager:warning("sender write to nonexistent topic '~s', creating", [Topic]),
-            {ok, _} = vg_topics_sup:start_child(Topic),
+            {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
             write(Sender, Topic, Partition, RecordSet)
     end.
 
@@ -94,6 +98,7 @@ init([Topic, Partition, NextNode, Tab]) ->
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
     vg_topics:update_hwm(Topic, Partition, Id - 1),
+
     {ok, #state{id=Id,
                 next_brick={?SERVER(Topic, Partition), NextNode},
                 topic_dir=TopicDir,

@@ -39,4 +39,4 @@ lookup_hwm(Topic, Partition) ->
     ets:lookup_element(?WATERMARK_TABLE, {Topic, Partition}, ?HWM_POS).
 
 update_hwm(Topic, Partition, HWMUpdate) ->
-    ets:update_element(?WATERMARK_TABLE, {Topic, Partition}, {?HWM_POS, HWMUpdate}).
+    true = ets:update_element(?WATERMARK_TABLE, {Topic, Partition}, {?HWM_POS, HWMUpdate}).
