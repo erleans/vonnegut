@@ -48,7 +48,7 @@ from_zero(_Config) ->
     %% listeners to come up
     timer:sleep(250),
 
-    ?assertMatch({ok, 0},
+    ?assertMatch({ok, 1},
                  vg_client:produce(Topic, [{<<"key">>, <<"record 1 wasn't long enough to make wrapping fail">>},
                                            <<"record 2">>])),
 
@@ -73,11 +73,11 @@ multi_topic_fetch(_Config) ->
     %% listeners to come up
     timer:sleep(250),
 
-    ?assertMatch({ok, 0},
+    ?assertMatch({ok, 1},
                  vg_client:produce(Topic1, [{<<"key">>, <<"topic 1 record 1">>},
                                             <<"topic 1 record 2">>])),
 
-    ?assertMatch({ok, 0},
+    ?assertMatch({ok, 1},
                  vg_client:produce(Topic2, [{<<"key-2">>, <<"topic 2 record 1">>},
                                             <<"topic 2 record 2">>])),
 

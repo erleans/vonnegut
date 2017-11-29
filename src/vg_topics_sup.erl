@@ -46,8 +46,13 @@ start_child(Server0, Topic, Partitions, Retries) ->
                [node(), Topic, Partitions, Server0]),
     prometheus_gauge:inc(active_topics),
     try
-        supervisor:start_child(Server, [Topic, Partitions])
-    catch _:_ ->
+        case supervisor:start_child(Server, [Topic, Partitions]) of
+            {ok, Pid} ->
+                {ok, Pid};
+            {error, {shutdown, {failed_to_start_child, _, Reason}}} ->
+                {error, Reason}
+        end
+    catch _C:_E->
             timer:sleep(100),
             start_child(Server0, Topic, Partitions, Retries - 1)
     end.
@@ -71,3 +76,4 @@ init([]) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+

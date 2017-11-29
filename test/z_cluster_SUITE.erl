@@ -197,8 +197,8 @@ all() ->
 %% test that the cluster is up and can do an end-to-end write/read cycle
 bootstrap(Config) ->
     %% just create topics when written to for now
-    %% do(vg, create_topic, [<<"foo">>]),
-    {ok, _} = vg_client:ensure_topic(<<"foo">>),
+    ok = wait_for_start(fun() -> vg_client:ensure_topic(<<"foo">>) end),
+
     {ok, R} = vg_client:produce(<<"foo">>, <<"bar">>),
     {ok, R1} = vg_client:fetch(<<"foo">>),
     ct:pal("r ~p ~p", [R, R1]),
@@ -284,6 +284,7 @@ restart(Config) ->
     Nodes = ?config(nodes, Config),
     Restarts = ?config(restart, Config),
 
+    %% add some stuff to look at
     ct:pal("nodes ~p", [Nodes]),
     [begin
          %% make a lot of topics and add a few things to them to delay restart
@@ -294,6 +295,7 @@ restart(Config) ->
      end
      || N <- lists:seq(1, 20)],
 
+    %% test whole node restart
     ct:pal("nodes() ~p", [nodes()]),
     [begin
          ?assertMatch({ok, _}, ct_slave:stop(Node))
@@ -310,31 +312,78 @@ restart(Config) ->
     swap_lager(Nodes1),
     wait_for_nodes(Nodes1, 50), % wait a max of 5s
     timer:sleep(2000),
-    ok = wait_for_start(<<"bar4">>),
+    ok = wait_for_start(fun() -> vg_client:fetch(<<"bar4">>, 0, 1) end),
 
+    %% probably need a better test here
     {ok, Result} = vg_client:fetch(<<"bar4">>, 0, 1000),
     ?assertMatch(#{<<"bar4">> := #{0 := #{high_water_mark := 49}}},
                  Result),
 
+    %% shut down each node in turn
+    [Head, Middle, Tail] = Nodes1,
+    [{HeadName, HeadArgs},
+     {MiddleName, MiddleArgs},
+     {TailName, TailArgs}] = Restarts,
+
+    {ok, _} = ct_slave:stop(Head),
+    timer:sleep(1000),
+    ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 49}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
+    ?assertMatch({error, pool_timeout}, vg_client:produce(<<"bar4">>, <<"this should fail">>)),
+    {ok, HeadNode} = ct_slave:start(HeadName, HeadArgs),
+    timer:sleep(100),
+    swap_lager([HeadNode]),
+    timer:sleep(2500),
+
+    %% if we start getting off-by-one errors in the hwms below, I
+    %% suspect that we might have gotten a timeout below and then
+    %% redid the produce
+    ok = wait_for_start(fun() -> vg_client:produce(<<"bar4">>, <<"this should work eventually">>) end),
+    ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 50}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
+
+    {ok, _} = ct_slave:stop(Middle),
+    timer:sleep(1000),
+    ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 50}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
+    ?assertMatch({error, timeout}, vg_client:produce(<<"bar4">>, <<"this should fail too">>)),
+    {ok, MiddleNode} = ct_slave:start(MiddleName, MiddleArgs),
+    timer:sleep(500),
+    swap_lager([MiddleNode]),
+
+    ok = wait_for_start(fun() -> vg_client:produce(<<"bar4">>, <<"this should work eventually too">>) end),
+    ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 51}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
+
+    {ok, _} = ct_slave:stop(Tail),
+    timer:sleep(1000),
+    ?assertMatch({error, pool_timeout}, vg_client:fetch(<<"bar4">>, 0, 1000)),
+    ?assertMatch({error, timeout}, vg_client:produce(<<"bar4">>, <<"this should fail">>)),
+    {ok, TailNode} = ct_slave:start(TailName, TailArgs),
+    swap_lager([TailNode]),
+
+    ok = wait_for_start(fun() -> vg_client:fetch(<<"bar4">>, 0, 1) end),
+    ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 51}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
+    ?assertMatch({ok, 52}, vg_client:produce(<<"bar4">>, <<"this should work">>)),
+
     Config.
 
-wait_for_start(Topic) ->
-    wait_for_start(Topic, 5000).
+wait_for_start(Thunk) ->
+    wait_for_start(Thunk, 5000).
 
-wait_for_start(_Topic, 0) ->
-    error(waited_too_long);
-wait_for_start(Topic, N) ->
-    case vg_client:fetch(Topic, 0, 1) of
+wait_for_start(_, Zero) when Zero =< 0 ->
+    {error, waited_too_long};
+wait_for_start(Thunk, N) ->
+    case Thunk() of
         {ok, _} = _OK ->
-            %%ct:pal("ok ~p", [_OK]),
+            %% ct:pal("ok ~p", [_OK]),
             timer:sleep(150),
             ok;
         {error, E} when E =:= no_socket orelse
-                        E =:= pool_timeout ->
+                        E =:= socket_closed ->
             timer:sleep(1),
-            wait_for_start(Topic, N - 1)
+            wait_for_start(Thunk, N - 1);
+        {error, E} when E =:= pool_timeout orelse
+                        E =:= timeout ->
+            timer:sleep(1),
+            wait_for_start(Thunk, N - 1000)
     end.
-
 
 
 %% to run this test: rebar3 ct --suite=z_cluster_SUITE --case=concurrent_perf

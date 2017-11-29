@@ -1,8 +1,8 @@
 -module(vg_pending_writes).
 
 -export([ensure_tab/2,
-         ack/3,
-         add/3]).
+         ack/2,
+         add/4]).
 
 -define(TAB_OPTIONS, [public, named_table, bag, {write_concurrency, true}]).
 -define(TAB(Topic, Partition), binary_to_atom(<<Topic/binary,
@@ -21,13 +21,19 @@ ensure_tab(Topic, Partition) ->
     end,
     Tab.
 
--spec ack(Topic :: binary(), Partition :: integer(), LatestId :: integer()) -> integer().
-ack(Topic, Partition, LatestId) ->
-    lager:debug("ack getting called on ~p ~s:~p with id ~p", [node(), Topic, Partition, LatestId]),
-    ets:select_delete(?TAB(Topic, Partition), [{{'$1', '$2'},
-                                                [{is_integer, '$1'}, {'=<', '$1', LatestId}],
-                                                [true]}]).
+-spec ack(Tab :: atom(), LatestId :: integer()) -> integer().
+ack(Tab, LatestId) ->
+    Acked = ets:select(Tab, [{{'$1', '$2', '$3'},
+                              [{is_integer, '$1'}, {'=<', '$1', LatestId}],
+                              ['$_']}]),
+    lager:info("ack getting called on ~p ~p with id ~p acks ~p", [node(), Tab, LatestId, Acked]),
+    %% faster to just iteratively delete/2 here?  probably not a perf issue
+    ets:select_delete(Tab, [{{'$1', '$2', '$3'},
+                             [{is_integer, '$1'}, {'=<', '$1', LatestId}],
+                             [true]}]),
+    Acked.
 
--spec add(Tab :: atom(), Id :: integer(), Msg :: iolist()) -> true.
-add(Tab, Id, Msg) ->
-    ets:insert(Tab, {Id, Msg}).
+-spec add(Tab :: atom(), Id :: integer(), From :: term(), Msg :: iolist()) -> true.
+add(Tab, Id, From, Msg) ->
+    lager:info("inserting ~p ~p ~p ~p", [Tab, Id, From, Msg]),
+    ets:insert(Tab, {Id, From, Msg}).

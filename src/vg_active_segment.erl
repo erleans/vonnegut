@@ -4,8 +4,7 @@
 -behaviour(gen_server).
 
 -export([start_link/3,
-         write/3, write/4,
-         ack/3]).
+         write/3]).
 
 -export([init/1,
          handle_call/3,
@@ -21,6 +20,7 @@
 
 -record(state, {topic_dir   :: file:filename(),
                 id          :: integer(),
+                pend_id     :: integer(),
                 next_brick  :: {node(), atom()},
                 byte_count  :: integer(),
                 pos         :: integer(),
@@ -60,26 +60,11 @@ write(Topic, Partition, RecordSet) ->
     %% clear that this is the right place for this
     try
         gen_server:call(?SERVER(Topic, Partition), {write, RecordSet})
-    catch _:{noproc, _} ->
+    catch _:_ ->
             lager:warning("write to nonexistent topic '~s', creating", [Topic]),
             {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
             write(Topic, Partition, RecordSet)
     end.
-
-%% TODO: clean up the duplication from all this
-write(Sender, Topic, Partition, RecordSet) ->
-    %% there clearly needs to be a lot more logic here.  it's also not
-    %% clear that this is the right place for this
-    try
-        gen_server:call(?SERVER(Topic, Partition), {write, Sender, RecordSet})
-    catch _:{noproc, _} ->
-            lager:warning("sender write to nonexistent topic '~s', creating", [Topic]),
-            {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
-            write(Sender, Topic, Partition, RecordSet)
-    end.
-
-ack(Topic, Partition, LatestId) ->
-    vg_pending_writes:ack(Topic, Partition, LatestId).
 
 init([Topic, Partition, NextNode, Tab]) ->
     lager:info("at=init topic=~p next_server=~p", [Topic, NextNode]),
@@ -99,67 +84,56 @@ init([Topic, Partition, NextNode, Tab]) ->
 
     vg_topics:update_hwm(Topic, Partition, Id - 1),
 
-    {ok, #state{id=Id,
-                next_brick={?SERVER(Topic, Partition), NextNode},
-                topic_dir=TopicDir,
-                byte_count=0,
-                pos=Position,
-                index_pos=IndexPosition,
-                log_fd=LogFD,
-                segment_id=list_to_integer(LastLogId),
-                index_fd=IndexFD,
-                topic=Topic,
-                partition=Partition,
-                config=Config,
-                history_tab=Tab
+    {ok, #state{id = Id,
+                next_brick = {?SERVER(Topic, Partition), NextNode},
+                topic_dir = TopicDir,
+                byte_count = 0,
+                pos = Position,
+                index_pos = IndexPosition,
+                log_fd = LogFD,
+                segment_id = list_to_integer(LastLogId),
+                index_fd = IndexFD,
+                topic = Topic,
+                partition = Partition,
+                config = Config,
+                history_tab = Tab
                }}.
 
-handle_call({write, RecordSet}, _From, State=#state{id=Id,
-                                                    topic=Topic,
-                                                    partition=Partition,
-                                                    next_brick=NextBrick}) ->
-    State1 = write_record_set(RecordSet, State),
-    case NextBrick of
-        {_, solo} -> ok;
-        {_, tail} -> ok;
-        {_, last} -> ok;
-        _ ->
-            gen_server:cast(NextBrick, {write, self(), RecordSet})
-    end,
-    LatestId = State1#state.id,
-    %% Should we do this in ack instead if it isn't solo or tail?
-    vg_topics:update_hwm(Topic, Partition, LatestId-1),
-    {reply, {ok, Id}, State1};
+handle_call({write, RecordSet}, _From, State = #state{topic = Topic,
+                                                      partition = Partition,
+                                                      next_brick = NextBrick}) ->
+    %% TODO: add pipelining of requests
+
+    Result =
+        case NextBrick of
+            {_, solo} -> proceed;
+            {_, tail} -> proceed;
+            {_, last} -> proceed;
+            _ ->
+                gen_server:call(NextBrick, {write, RecordSet}, timeout())
+        end,
+    case Result of
+        Go when Go =:= proceed orelse
+                element(1, Go) =:= ok ->
+            State1 = write_record_set(RecordSet, State),
+            LatestId = State1#state.id,
+            vg_topics:update_hwm(Topic, Partition, LatestId - 1),
+            {reply, {ok, LatestId - 1}, State1};
+        %% this is the hard part
+        {error, timeout} ->
+            %% retries go here :/
+            {reply, {error, timeout}, State};
+        {error, Reason} ->
+            {reply, {error, Reason}, State}
+    end;
 handle_call(_Msg, _From, State) ->
     lager:info("bad call ~p ~p", [_Msg, _From]),
     {noreply, State}.
 
-handle_cast({write, Sender, RecordSet}, State=#state{topic=Topic,
-                                                     partition=Partition,
-                                                     next_brick=NextBrick}) ->
-    State1 = write_record_set(RecordSet, State),
-    case NextBrick of
-        {_, solo} -> ok;
-        {_, tail} -> ok;
-        {_, last} -> ok;
-        _ ->
-            gen_server:cast(NextBrick, {write, self(), RecordSet})
-    end,
-
-    LatestId = State1#state.id,
-    %% Should we do this in ack instead if it isn't solo or tail?
-    vg_topics:update_hwm(Topic, Partition, LatestId-1),
-    %% TODO: batch acks
-    Sender ! {ack, LatestId},
-
-    {noreply, State1};
 handle_cast(_Msg, State) ->
     lager:info("bad cast ~p", [_Msg]),
     {noreply, State}.
 
-handle_info({ack, ID}, State) ->
-    ack(State#state.topic, State#state.partition, ID),
-    {noreply, State};
 handle_info(_, State) ->
     {noreply, State}.
 
@@ -171,7 +145,7 @@ code_change(_, State, _) ->
 
 %%
 
-write_record_set(RecordSet, State=#state{history_tab=Tab, next_brick=Next}) ->
+write_record_set(RecordSet, State) ->
     lists:foldl(fun(Record, StateAcc=#state{id=Id,
                                             byte_count=ByteCount}) ->
                     {NextId, Size, Bytes} = vg_protocol:encode_log(Id, Record),
@@ -179,14 +153,6 @@ write_record_set(RecordSet, State=#state{history_tab=Tab, next_brick=Next}) ->
                     update_log(Bytes, StateAcc1),
                     StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
                     StateAcc3 = update_index(StateAcc2),
-
-                    case Next of
-                        %%solo -> ok;
-                        {_, last} -> ok;
-                        {_, tail} -> ok;
-                        _ ->
-                            vg_pending_writes:add(Tab, Id, Bytes)
-                    end,
 
                     StateAcc3#state{id=NextId,
                                     pos=Position1+Size}
@@ -257,3 +223,6 @@ setup_config() ->
             segment_bytes=SegmentBytes,
             index_max_bytes=IndexMaxBytes,
             index_interval_bytes=IndexIntervalBytes}.
+
+timeout() ->
+    application:get_env(vonnegut, ack_timeout, 1000).
