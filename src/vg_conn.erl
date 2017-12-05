@@ -236,8 +236,12 @@ handle_request(?FETCH2_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/sign
 handle_request(?PRODUCE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
     Results = [{Topic, [begin
-                            {ok, Offset} = vg_active_segment:write(Topic, Partition, MessageSet),
-                            {Partition, ?NONE_ERROR, Offset}
+                            case vg_active_segment:write(Topic, Partition, MessageSet) of
+                                {ok, Offset} ->
+                                    {Partition, ?NO_ERROR, Offset};
+                                {error, timeout} ->
+                                    {Partition, ?TIMEOUT_ERROR, -1}
+                            end
                         end || {Partition, MessageSet} <- PartitionData]}
               || {Topic, PartitionData} <- TopicData],
     ProduceResponse = vg_protocol:encode_produce_response(Results),
@@ -335,34 +339,24 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
               [Topic, Partition, Offset, SegmentId, Position]),
 
     File = vg_utils:log_file(Topic, Partition, SegmentId),
-    {ok, Fd} = file:open(File, [read, binary, raw]),
-    try
-        SendBytes =
-            case Fetch of
-                unlimited ->
-                    filelib:file_size(File) - Position;
-                {limited, Limited} ->
-                    Limited
-            end,
-        Bytes =
-            case MaxBytes of
-                0 -> SendBytes;
-                _ -> min(SendBytes, MaxBytes)
-            end,
-        ErrorCode = 0,
-        HighWaterMark = vg_topics:lookup_hwm(Topic, Partition),
-        Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HighWaterMark, Bytes),
+    SendBytes =
+        case Fetch of
+            unlimited ->
+                filelib:file_size(File) - Position;
+            {limited, Limited} ->
+                Limited
+        end,
+    Bytes =
+        case MaxBytes of
+            0 -> SendBytes;
+            _ -> min(SendBytes, MaxBytes)
+        end,
+    ErrorCode = 0,
+    HighWaterMark = vg_topics:lookup_hwm(Topic, Partition),
+    Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HighWaterMark, Bytes),
 
-        lager:debug("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
-        {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}
-    catch Type:Exception ->
-            lager:error("type=~p exception=~p stacktrace=~p", [Type, Exception, erlang:get_stacktrace()]),
-            %% we should just crash here, otherwise we risk sending a
-            %% malformed response.
-            error(crashed_while_fetching)
-    after
-        file:close(Fd)
-    end.
+    lager:debug("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
+    {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}.
 
 %% a fetch response is a list of iolists and tuples representing file chunks to send through sendfile
 do_send(FetchResults, Socket) ->
@@ -382,7 +376,7 @@ sendfile(File, Position, Bytes, Socket) ->
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
         {ok, _} = file:sendfile(Fd, Socket, Position, Bytes, [])
-        %% maybe catch any errors here and report them?
+        %% best to crash here rather than try to recover.
     after
         file:close(Fd)
     end.

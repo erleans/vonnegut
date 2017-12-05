@@ -54,8 +54,10 @@ init_per_suite(Config) ->
          || N0 <- lists:seq(0, 2)],
     {Nodes, RestartInfos} = lists:unzip(Nodes0),
     wait_for_nodes(Nodes, 50), % wait a max of 5s
-    timer:sleep(5000),
+    timer:sleep(3000),
     swap_lager(Nodes),
+    {ok, CoverNodes} = ct_cover:add_nodes(Nodes),
+    ct:pal("cover added to ~p", [CoverNodes]),
     [{nodes, Nodes},
      {restart, RestartInfos}
      | Config].
@@ -97,11 +99,18 @@ start_lager() ->
     ok.
 
 swap_lager(Nodes) ->
-    [begin
-         pong = net_adm:ping(Node),
-         ok = rpc:call(Node, vonnegut_app, swap_lager, [whereis(lager_event)])
-     end
-     || Node <- Nodes].
+    %% for deeper debugging, sometimes it's nice to be able to toggle this off
+    Disable = true,
+    case Disable of
+        true ->
+            ok;
+        _ ->
+            [begin
+                 pong = net_adm:ping(Node),
+                 ok = rpc:call(Node, vonnegut_app, swap_lager, [whereis(lager_event)])
+             end
+             || Node <- Nodes]
+    end.
 
 end_per_suite(Config) ->
     Nodes = ?config(nodes, Config),
@@ -182,8 +191,8 @@ groups() ->
        roles,
        acks,
        concurrent_fetch,
-       restart%,
-       %restart_slow
+       id_replication,
+       restart
       ]}
 
     ].
@@ -310,6 +319,8 @@ restart(Config) ->
          end
          || {Name, Args} <- Restarts],
     swap_lager(Nodes1),
+    _ = ct_cover:add_nodes(Nodes1),
+
     wait_for_nodes(Nodes1, 50), % wait a max of 5s
     timer:sleep(2000),
     ok = wait_for_start(fun() -> vg_client:fetch(<<"bar4">>, 0, 1) end),
@@ -332,7 +343,7 @@ restart(Config) ->
     {ok, HeadNode} = ct_slave:start(HeadName, HeadArgs),
     timer:sleep(100),
     swap_lager([HeadNode]),
-    timer:sleep(2500),
+    _ = ct_cover:add_nodes([HeadNode]),
 
     %% if we start getting off-by-one errors in the hwms below, I
     %% suspect that we might have gotten a timeout below and then
@@ -345,8 +356,9 @@ restart(Config) ->
     ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 50}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
     ?assertMatch({error, timeout}, vg_client:produce(<<"bar4">>, <<"this should fail too">>)),
     {ok, MiddleNode} = ct_slave:start(MiddleName, MiddleArgs),
-    timer:sleep(500),
+    timer:sleep(100),
     swap_lager([MiddleNode]),
+    _ = ct_cover:add_nodes([MiddleNode]),
 
     ok = wait_for_start(fun() -> vg_client:produce(<<"bar4">>, <<"this should work eventually too">>) end),
     ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 51}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
@@ -356,12 +368,49 @@ restart(Config) ->
     ?assertMatch({error, pool_timeout}, vg_client:fetch(<<"bar4">>, 0, 1000)),
     ?assertMatch({error, timeout}, vg_client:produce(<<"bar4">>, <<"this should fail">>)),
     {ok, TailNode} = ct_slave:start(TailName, TailArgs),
+    timer:sleep(100),
     swap_lager([TailNode]),
-
+    _ = ct_cover:add_nodes([TailNode]),
     ok = wait_for_start(fun() -> vg_client:fetch(<<"bar4">>, 0, 1) end),
     ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 51}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
     ?assertMatch({ok, 52}, vg_client:produce(<<"bar4">>, <<"this should work">>)),
 
+    Config.
+
+id_replication(Config) ->
+    Nodes = ?config(nodes, Config),
+    [_Head, _Middle, Tail] = Nodes,
+
+    Topic = <<"bar-n">>,
+    {ok, _} = vg_client:ensure_topic(Topic),
+    vg_client:produce(Topic, [<<"baz", (integer_to_binary(T))/binary>>
+                                  || T <- lists:seq(1, 50)]),
+
+    ok = wait_for_start(fun() -> vg_client:fetch(Topic, 0, 1) end),
+
+    ?assertMatch({ok, 50}, vg_client:produce(Topic, <<"this should work">>)),
+
+
+    %% this block is kind of fragile, in the future we might want to
+    %% build this sort of stuff into the vg.erl client when it's
+    %% rewritten to separate conn and reading/writing from disk
+
+    %% what it's doing is simulating a situation where tail receives a
+    %% write and commits it, but then either middle or head are
+    %% partitioned, so have not written it.  this means that the id of
+    %% head and tail are out of sync, so we need to repair this
+    %% somehow, so pass it back up to the head, which writes it then
+    %% retries.  This is complicated by retry detection and multiple
+    %% producers, but that should go away once we're on the 1.0
+    %% protocol.
+    R0 = vg_protocol:encode_produce(0, 4000, [{Topic, [{0, [<<"asdasd">>, <<"asdasdas">>]}]}]),
+    R1 = iolist_to_binary(R0),
+    {_, _, R2} = vg_protocol:decode_produce_request(R1),
+    [{_, R3}] = R2,
+    [{_, R}] = R3,
+    ?assertMatch({ok, 52}, rpc:call(Tail, gen_server, call, [{'bar-n-0', Tail}, {write, 53, R}, 5000])),
+    %% note that we VVVV succeed with 53 even though the previous writes never went through head
+    ?assertMatch({ok, 53}, vg_client:produce(Topic, <<"this should succeed on retry">>)),
     Config.
 
 wait_for_start(Thunk) ->
@@ -381,7 +430,6 @@ wait_for_start(Thunk, N) ->
             wait_for_start(Thunk, N - 1);
         {error, E} when E =:= pool_timeout orelse
                         E =:= timeout ->
-            timer:sleep(1),
             wait_for_start(Thunk, N - 1000)
     end.
 

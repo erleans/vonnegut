@@ -146,6 +146,8 @@ produce(Topic, RecordSet, Timeout) ->
                     {ok, #{Topic := #{0 := #{error_code := 0,
                                              offset := Offset}}}} ->
                         {ok, Offset};
+                    {ok, #{Topic := #{0 := #{error_code := ?TIMEOUT_ERROR}}}} ->
+                        {error, timeout};
                     {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
                         {error, ErrorCode};
                     {error, Reason} ->

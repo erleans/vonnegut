@@ -11,7 +11,8 @@
 -export([start_link/0,
          start_child/1,
          start_child/2,
-         start_child/3]).
+         start_child/3,
+         start_child/4]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -49,10 +50,13 @@ start_child(Server0, Topic, Partitions, Retries) ->
         case supervisor:start_child(Server, [Topic, Partitions]) of
             {ok, Pid} ->
                 {ok, Pid};
+            {error, {already_started, Pid}} ->
+                {ok, Pid};
             {error, {shutdown, {failed_to_start_child, _, Reason}}} ->
                 {error, Reason}
         end
     catch _C:_E->
+            lager:info("~p : ~p", [_C,_E]),
             timer:sleep(100),
             start_child(Server0, Topic, Partitions, Retries - 1)
     end.

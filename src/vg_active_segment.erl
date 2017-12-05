@@ -20,7 +20,6 @@
 
 -record(state, {topic_dir   :: file:filename(),
                 id          :: integer(),
-                pend_id     :: integer(),
                 next_brick  :: {node(), atom()},
                 byte_count  :: integer(),
                 pos         :: integer(),
@@ -47,8 +46,15 @@
 start_link(Topic, Partition, NextBrick) ->
     %% worth the trouble of making sure we have no acks table on tails?
     Tab = vg_pending_writes:ensure_tab(Topic, Partition),
-    gen_server:start_link({local, ?NEW_SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab],
-                          [{hibernate_after, timer:minutes(5)}]). %% hibernate after 5 minutes with no messages
+    case gen_server:start_link({local, ?NEW_SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab],
+                               [{hibernate_after, timer:minutes(5)}]) of % hibernate after 5 minutes with no messages
+        {ok, Pid} ->
+            {ok, Pid};
+        {error, {already_started, Pid}} ->
+            {ok, Pid};
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 -spec write(Topic, Partition, RecordSet) -> {ok, Offset} | {error, any()} when
       Topic :: binary(),
@@ -59,12 +65,23 @@ write(Topic, Partition, RecordSet) ->
     %% there clearly needs to be a lot more logic here.  it's also not
     %% clear that this is the right place for this
     try
-        gen_server:call(?SERVER(Topic, Partition), {write, RecordSet})
-    catch _:_ ->
-            lager:warning("write to nonexistent topic '~s', creating", [Topic]),
-            {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
-            write(Topic, Partition, RecordSet)
+        case gen_server:call(?SERVER(Topic, Partition), {write, head, RecordSet}) of
+            retry ->
+                write(Topic, Partition, RecordSet);
+            R -> R
+        end
+    catch _:{noproc, _} ->
+            create_retry(Topic, Partition, RecordSet);
+          error:badarg ->  %% is this too broad?  how to restrict?
+            create_retry(Topic, Partition, RecordSet);
+          exit:{timeout, _} ->
+            {error, timeout}
     end.
+
+create_retry(Topic, Partition, RecordSet)->
+    lager:warning("write to nonexistent topic '~s', creating", [Topic]),
+    {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
+    write(Topic, Partition, RecordSet).
 
 init([Topic, Partition, NextNode, Tab]) ->
     lager:info("at=init topic=~p next_server=~p", [Topic, NextNode]),
@@ -99,32 +116,102 @@ init([Topic, Partition, NextNode, Tab]) ->
                 history_tab = Tab
                }}.
 
-handle_call({write, RecordSet}, _From, State = #state{topic = Topic,
-                                                      partition = Partition,
-                                                      next_brick = NextBrick}) ->
+handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{id = ID,
+                                                                   topic = Topic,
+                                                                   partition = Partition,
+                                                                   next_brick = NextBrick}) ->
     %% TODO: add pipelining of requests
+    try
+        ExpectedID =
+            case ExpectedID0 of
+                head ->
+                    ID + length(RecordSet);
+                Supplied when is_integer(Supplied) ->
+                    case ID + length(RecordSet) == Supplied of
+                        true ->
+                            ExpectedID0;
+                        %% should we check > vs < here?  one is repair
+                        %% the other is bad corruption
+                        _ ->
+                            %% inferred current id of the writing segment
+                            WriterID = ExpectedID0 - length(RecordSet),
+                            %% this should probably be limited, if
+                            %% we're going back too far, we need to be
+                            %% in some sort of catch-up mode
+                            lager:debug("starting write repair, ~p", [WriterID]),
+                            WriteRepairSet = write_repair(WriterID, State),
+                            throw({write_repair, WriteRepairSet, State})
+                    end
+            end,
+        lager:info("write call from ~p", [_From]),
 
-    Result =
-        case NextBrick of
-            {_, solo} -> proceed;
-            {_, tail} -> proceed;
-            {_, last} -> proceed;
-            _ ->
-                gen_server:call(NextBrick, {write, RecordSet}, timeout())
-        end,
-    case Result of
-        Go when Go =:= proceed orelse
-                element(1, Go) =:= ok ->
-            State1 = write_record_set(RecordSet, State),
-            LatestId = State1#state.id,
-            vg_topics:update_hwm(Topic, Partition, LatestId - 1),
-            {reply, {ok, LatestId - 1}, State1};
-        %% this is the hard part
-        {error, timeout} ->
-            %% retries go here :/
-            {reply, {error, timeout}, State};
-        {error, Reason} ->
-            {reply, {error, Reason}, State}
+        Result =
+            case NextBrick of
+                {_, Role} when Role == solo; Role == tail -> proceed;
+                _ ->
+                    (fun Loop(_, _, Remaining) when Remaining =< 0 ->
+                             {error, timeout};
+                         Loop(B, Start, Remaining) ->
+                             {Time, B1} = backoff:fail(B),
+                             case catch gen_server:call(NextBrick,
+                                                        {write, ExpectedID, RecordSet},
+                                                        Remaining) of
+                                 retry ->
+                                     Now = erlang:monotonic_time(milli_seconds),
+                                     Elapsed = Now - Start,
+                                     %% reset backoff
+                                     Loop(backoff:init(2, 100), Now, Remaining - Elapsed);
+                                 %% I think all of these are retryable
+                                 {'EXIT', {noproc, _}} ->
+                                     {_Topic, Server} = NextBrick,
+                                     %% if the remote process is down,
+                                     %% attempt to start it and retry
+                                     _ = vg_topics_sup:start_child(Server, Topic, [Partition], 1),
+                                     timer:sleep(Time),
+                                     Now = erlang:monotonic_time(milli_seconds),
+                                     Elapsed = Now - Start,
+                                     Loop(B1, Now, Remaining - Elapsed);
+                                 {'EXIT', _} ->
+                                     timer:sleep(Time),
+                                     Now = erlang:monotonic_time(milli_seconds),
+                                     Elapsed = Now - Start,
+                                     Loop(B1, Now, Remaining - Elapsed);
+                                 Result ->
+                                     Result
+                             end
+                     end)(backoff:init(2, 100), erlang:monotonic_time(milli_seconds), timeout() * 5)
+            end,
+
+        case Result of
+            Go when Go =:= proceed orelse
+                    element(1, Go) =:= ok ->
+                State1 = write_record_set(RecordSet, State),
+                LatestId = State1#state.id,
+                vg_topics:update_hwm(Topic, Partition, LatestId - 1),
+                {reply, {ok, LatestId - 1}, State1};
+            {write_repair, RepairSet} ->
+                prometheus_counter:inc(write_repairs),
+                %% add in the following when pipelining is added, if it makes sense
+                %% prometheus_gauge:inc(pending_write_repairs, length(RepairSet)),
+                State1 = lists:foldl(
+                           fun({_ID, Data}, S) ->
+                                   %% ideally we could do this without decoding?
+                                   RepSet = vg_protocol:decode_record_set(Data, []),
+                                   write_record_set(RepSet, S)
+                           end, State, RepairSet),
+                case ExpectedID0 of
+                    head ->
+                        {reply, retry, State1};
+                    _ ->
+                        {reply, {write_repair, RepairSet}, State1}
+                end;
+            {error, Reason} ->
+                {reply, {error, Reason}, State}
+        end
+    catch throw:{write_repair, RS, S} ->
+            {reply, {write_repair, RS}, S};
+          throw:{E, S} ->
+            {reply, {error, E}, S}
     end;
 handle_call(_Msg, _From, State) ->
     lager:info("bad call ~p ~p", [_Msg, _From]),
@@ -213,6 +300,26 @@ update_index(State=#state{id=Id,
                 byte_count=0};
 update_index(State) ->
     State.
+
+write_repair(Start, #state{id = ID, topic = Topic, partition = Partition} = _State) ->
+    %% two situations: replaying single-segment writes, and writes
+    %% that span multiple segments
+    {StartSegmentID, StartPosition} = vg_log_segments:find_segment_offset(Topic, Partition, Start),
+    {EndSegmentID, EndPosition} = vg_log_segments:find_segment_offset(Topic, Partition, ID),
+    File = vg_utils:log_file(Topic, Partition, StartSegmentID),
+    lager:debug("at=write_repair file=~p start=~p end=~p", [File, StartPosition, EndPosition]),
+    case StartSegmentID == EndSegmentID of
+        true ->
+            {ok, FD} = file:open(File, [read, binary, raw]),
+            try
+                {ok, Data} = file:pread(FD, StartPosition, EndPosition - StartPosition),
+                [{StartSegmentID, Data}]
+            after
+                file:close(FD)
+            end;
+        _ ->
+            error(not_implemented)
+    end.
 
 setup_config() ->
     {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
