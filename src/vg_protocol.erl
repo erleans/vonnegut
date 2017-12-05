@@ -118,6 +118,25 @@ encode_record(Record) ->
       Id :: integer(),
       Value :: vg:record(),
       EncodedLog :: {pos_integer(), pos_integer(), iolist()} | {error, bad_checksum}.
+%% if we have an id, we're coming in from write repair and have to handle the checksum differently
+encode_log(Id, #{crc := CRC, id := LogID, record := Record}) ->
+    case LogID of
+        Id ->
+            Record2 = [<<?MAGIC:8/signed-integer, 0:8/signed-integer>>, encode_kv(Record)],
+            case erlang:crc32(Record2) of
+                CRC ->
+                    RecordIoList = [<<CRC:32/unsigned-integer>>, Record2],
+                    RecordSize = erlang:iolist_size(RecordIoList),
+                    {Id+1, RecordSize+12, [<<Id:64/signed-integer, RecordSize:32/signed-integer>>, RecordIoList]};
+                BadChecksum ->
+                    lager:error("checksums don't match crc1=~p crc2=~p", [CRC, BadChecksum]),
+                    {error, bad_checksum}
+            end;
+        _ ->
+            lager:error("ids don't match on write repair id1=~p id2=~p", [Id, LogID]),
+            {error, bad_id}
+    end;
+%% here we're coming from a decoded produce request.
 encode_log(Id, #{crc := CRC, record := Record}) ->
     case erlang:crc32(Record) of
         CRC ->
@@ -125,9 +144,10 @@ encode_log(Id, #{crc := CRC, record := Record}) ->
             RecordSize = erlang:iolist_size(RecordIoList),
             {Id+1, RecordSize+12, [<<Id:64/signed-integer, RecordSize:32/signed-integer>>, RecordIoList]};
         BadChecksum ->
-            lager:info("checksums don't match crc1=~p crc2=~p", [CRC, BadChecksum]),
+            lager:error("checksums don't match crc1=~p crc2=~p", [CRC, BadChecksum]),
             {error, bad_checksum}
     end;
+%% not sure if anything uses this code path
 encode_log(Id, #{record := Record}) ->
     EncodedRecord = encode_record(Record),
     RecordSize = erlang:iolist_size(EncodedRecord),
@@ -333,16 +353,16 @@ decode_fetch_partition(<<Partition:32/signed-integer, ErrorCode:16/signed-intege
     %% - throttle time
     %% - topic name
     {{Partition, #{high_water_mark => HighWaterMark,
-                  record_set_size => Bytes,
-                  error_code => ErrorCode,
-                  record_set => decode_record_set(RecordSet, [])}}, Rest};
+                   record_set_size => Bytes,
+                   error_code => ErrorCode,
+                   record_set => decode_record_set(RecordSet, [])}}, Rest};
 decode_fetch_partition(_) ->
     more.
 
 %% TODO: validate recordsize
 decode_record_set(End, Set) when End =:= eof orelse End =:= <<>> ->
     lists:reverse(Set);
-decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/signed-integer,
+decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/unsigned-integer,
                     ?MAGIC:8/signed-integer, Attributes:8/signed-integer, -1:32/signed-integer,
                     ValueSize:32/signed-integer, Value:ValueSize/binary, Rest/binary>>, Set) ->
     case ?COMPRESSION(Attributes) of
@@ -358,7 +378,7 @@ decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/
             decode_record_set(Rest, decode_record_set(lz4:unpack(Value), Set))
     end;
 %% compression only allowed if key is null
-decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/signed-integer,
+decode_record_set(<<Id:64/signed-integer, _RecordSize:32/signed-integer, Crc:32/unsigned-integer,
                     ?MAGIC:8/signed-integer, _Attributes:8/signed-integer,
                     KeySize:32/signed-integer, Key:KeySize/binary, ValueSize:32/signed-integer,
                     Value:ValueSize/binary, Rest/binary>>, Set) ->

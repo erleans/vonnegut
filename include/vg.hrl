@@ -21,7 +21,9 @@
 -define(FETCH2_REQUEST, 1001).
 -define(ENSURE_REQUEST, 1002).
 
--define(NONE_ERROR, 0).
+-define(UNKNOWN_ERROR, -1).
+-define(NO_ERROR, 0).
+-define(TIMEOUT_ERROR, 7).
 -define(FETCH_DISALLOWED_ERROR, 129).
 -define(PRODUCE_DISALLOWED_ERROR, 131).
 
