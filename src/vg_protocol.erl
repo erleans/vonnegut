@@ -231,7 +231,9 @@ decode_response(<<Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
     <<CorrelationId:32/signed-integer, Response/binary>> = Record,
     {CorrelationId, Response, Rest};
 decode_response(<<Size:32/signed-integer, Rest/binary>>) ->
-    {more, Size - byte_size(Rest)}.
+    {more, Size - byte_size(Rest)};
+decode_response(_) ->
+    more.
 
 decode_response(?FETCH_REQUEST, Response) ->
     decode_fetch_response(Response);
