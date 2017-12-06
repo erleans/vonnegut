@@ -195,7 +195,9 @@ encode_partition_metadata(PartitionMetadata) ->
 %% decode generic functions
 
 decode_array(DecodeFun, <<Length:32/signed-integer, Rest/binary>>) ->
-    decode_array(DecodeFun, Length, Rest, []).
+    decode_array(DecodeFun, Length, Rest, []);
+decode_array(_, _) ->
+    more.
 
 decode_array(_, 0, Rest, Acc) ->
     {lists:reverse(Acc), Rest};
@@ -307,17 +309,27 @@ decode_partition_metadata(<<_PartitionErrorCode:16/signed-integer, PartitionId:3
        replicas => Replicas}, Rest2}.
 
 decode_produce_response(Response) ->
-    {TopicResults, _Rest}= decode_array(fun decode_produce_response_topics/1, Response),
-    maps:from_list(TopicResults).
+    case decode_array(fun decode_produce_response_topics/1, Response) of
+        {TopicResults, _Rest} ->
+            maps:from_list(TopicResults);
+        more -> more
+    end.
 
 decode_produce_response_topics(<<Size:16/signed-integer, Topic:Size/binary, PartitionsRaw/binary>>) ->
-    {Partitions, Rest} = decode_array(fun decode_produce_response_partitions/1, PartitionsRaw),
-    {{Topic, maps:from_list(Partitions)}, Rest}.
+    case decode_array(fun decode_produce_response_partitions/1, PartitionsRaw) of
+        {Partitions, Rest} ->
+            {{Topic, maps:from_list(Partitions)}, Rest};
+        more -> more
+    end;
+decode_produce_response_topics(_) ->
+    more.
 
 decode_produce_response_partitions(<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
                                      Offset:64/signed-integer, Rest/binary>>) ->
     {{Partition, #{error_code => ErrorCode,
-                   offset => Offset}}, Rest}.
+                   offset => Offset}}, Rest};
+decode_produce_response_partitions(_) ->
+    more.
 
 decode_topics_response(<<TopicsCount:32/signed-integer, Msg/binary>>) ->
     {Chains, _Rest} = decode_array(fun decode_chain/1, Msg),
@@ -344,7 +356,9 @@ decode_fetch_topic(<<Sz:16/signed-integer, Topic:Sz/binary, Partitions/binary>>)
         {DecPartitions, Rest} ->
             {{Topic, maps:from_list(DecPartitions)}, Rest};
         more -> more
-    end.
+    end;
+decode_fetch_topic(_) ->
+    more.
 
 decode_fetch_partition(<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
                          HighWaterMark:64/signed-integer, Bytes:32/signed-integer, RecordSet:Bytes/bytes,
