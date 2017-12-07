@@ -66,15 +66,15 @@ incomplete_fetch_decode(_Config) ->
                             #{0 =>
                                   #{error_code => 0,high_water_mark => 99,
                                     record_set =>
-                                        [#{crc => -1443659216,id => 55,
+                                        [#{crc => 2851308080,id => 55,
                                            record => <<"bar1">>},
                                          #{crc => 821744522,id => 56,
                                            record => <<"bar2">>},
                                          #{crc => 1207821084,id => 57,
                                            record => <<"bar3">>},
-                                         #{crc => -644254017,id => 58,
+                                         #{crc => 3650713279,id => 58,
                                            record => <<"bar4">>},
-                                         #{crc => -1365359063,id => 59,
+                                         #{crc => 2929608233,id => 59,
                                            record => <<"bar5">>}],
                                     record_set_size => 150}}},
                  vg_protocol:decode_fetch_response(FullResponse)),
