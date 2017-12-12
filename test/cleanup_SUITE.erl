@@ -38,7 +38,7 @@ delete_policy(_Config) ->
 
     RandomRecords = [#{record => M}
                       || M <- [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60)]],
-    vg:write(Topic, RandomRecords),
+    vg:write(Topic, Partition, RandomRecords),
 
     %% Verify 2 segments have been created
     Segment0 = filename:join([TopicPartitionDir, "00000000000000000000.log"]),
