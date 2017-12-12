@@ -38,7 +38,7 @@ record_set_larger_than_max_segment(_Config) ->
                       || M <- [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
                                crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
                                crypto:strong_rand_bytes(60)]],
-    vg:write(Topic, RandomRecords),
+    vg:write(Topic, 0, RandomRecords),
 
     %% Total size of a 60 byte record when written to log becomes 86 bytes
     %% Since index interval is 24 and 86 > 24, 1 index entry of 6 bytes should exist for each as well

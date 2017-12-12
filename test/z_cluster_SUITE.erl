@@ -100,7 +100,7 @@ start_lager() ->
 
 swap_lager(Nodes) ->
     %% for deeper debugging, sometimes it's nice to be able to toggle this off
-    Disable = true,
+    Disable = false,
     case Disable of
         true ->
             ok;

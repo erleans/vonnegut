@@ -236,7 +236,7 @@ handle_request(?FETCH2_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/sign
 handle_request(?PRODUCE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
     Results = [{Topic, [begin
-                            case vg_active_segment:write(Topic, Partition, MessageSet) of
+                            case vg:write(Topic, Partition, MessageSet) of
                                 {ok, Offset} ->
                                     {Partition, ?NO_ERROR, Offset};
                                 {error, timeout} ->
@@ -304,59 +304,13 @@ fetch(Topic, Partitions) ->
     HeaderSize = 4 + 2 + size(Topic),
     {Size, Response} =
         lists:foldl(fun({Partition, Offset, MaxBytes}, {Size, ResponseAcc}) ->
-                            {S, R, F} = fetch(Topic, Partition, Offset, MaxBytes, -1),
+                            {S, R, F} = vg:fetch(Topic, Partition, Offset, MaxBytes, -1),
                             {Size + S, [R, F | ResponseAcc]};
                        ({Partition, Offset, MaxBytes, Limit}, {Size, ResponseAcc}) ->
-                            {S, R, F} = fetch(Topic, Partition, Offset, MaxBytes, Limit),
+                            {S, R, F} = vg:fetch(Topic, Partition, Offset, MaxBytes, Limit),
                             {Size + S, [R, F | ResponseAcc]}
                     end, {HeaderSize, []}, Partitions),
     {Size, [TopicResponseHeader | Response]}.
-
-%% A fetch of offset -1 returns Limit number of the records up to the high watermark
-fetch(Topic, Partition, -1, MaxBytes, Limit) ->
-    Offset = vg_topics:lookup_hwm(Topic, Partition),
-    fetch(Topic, Partition, erlang:max(0, Offset - Limit + 1), MaxBytes, Limit);
-fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
-    {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
-    Fetch =
-        case Limit of
-            -1 ->
-                unlimited;
-            _ ->
-                {EndSegmentId, EndPosition} =
-                    vg_log_segments:find_segment_offset(Topic, Partition, Offset + Limit),
-                case SegmentId of
-                    %% max on this segment, limit fetch
-                    EndSegmentId ->
-                        {limited, EndPosition - Position};
-                    %% some higher segment, unlimited fetch
-                    _ ->
-                        unlimited
-                end
-        end,
-
-    lager:info("at=fetch_request topic=~s partition=~p offset=~p segment_id=~p position=~p",
-              [Topic, Partition, Offset, SegmentId, Position]),
-
-    File = vg_utils:log_file(Topic, Partition, SegmentId),
-    SendBytes =
-        case Fetch of
-            unlimited ->
-                filelib:file_size(File) - Position;
-            {limited, Limited} ->
-                Limited
-        end,
-    Bytes =
-        case MaxBytes of
-            0 -> SendBytes;
-            _ -> min(SendBytes, MaxBytes)
-        end,
-    ErrorCode = 0,
-    HighWaterMark = vg_topics:lookup_hwm(Topic, Partition),
-    Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HighWaterMark, Bytes),
-
-    lager:debug("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
-    {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}.
 
 %% a fetch response is a list of iolists and tuples representing file chunks to send through sendfile
 do_send(FetchResults, Socket) ->

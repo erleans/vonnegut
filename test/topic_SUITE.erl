@@ -6,7 +6,8 @@
 
 all() ->
     [creation, write_empty, write, index_bug, limit, index_limit,
-     startup_index_correctness, many, verify_lazy_load].
+     startup_index_correctness, many, verify_lazy_load,
+     local_client_test].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -275,3 +276,16 @@ verify_lazy_load(_Config) ->
                                  lists:duplicate(100, <<"123456789abcdef">>)),
 
     ?assertNotEqual(undefined, erlang:whereis(Name)).
+
+local_client_test(Config) ->
+    Topic = ?config(topic, Config),
+    vg:write(Topic, 0, <<"foo">>),
+    {ok, Ret} = vg:fetch(Topic),
+    ?assertMatch(#{high_water_mark := 0,
+                   partition := 0,
+                   record_set :=
+                       [#{crc := 656261833,
+                          id := 0,
+                          record := <<"foo">>}]},
+                 Ret),
+    ok.
