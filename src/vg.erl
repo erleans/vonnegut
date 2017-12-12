@@ -3,7 +3,7 @@
 -export([create_topic/1,
          ensure_topic/1,
          write/3,
-         fetch/1, fetch/2,
+         fetch/1, fetch/2, fetch/4,
          fetch/5]).
 
 -include("vg.hrl").
@@ -20,22 +20,59 @@
 
 -spec create_topic(Topic :: topic()) -> ok.
 create_topic(Topic) ->
-    {ok, _Chain} = vg_cluster_mgr:create_topic(Topic),
-    ok.
+    case validate_topic(Topic) of
+        ok ->
+            {ok, _Chain} = vg_cluster_mgr:create_topic(Topic),
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
 -spec ensure_topic(Topic :: topic()) -> ok.
 ensure_topic(Topic) ->
-    {ok, _Chain} = vg_cluster_mgr:ensure_topic(Topic),
-    ok.
+    case validate_topic(Topic) of
+        ok ->
+            {ok, _Chain} = vg_cluster_mgr:ensure_topic(Topic),
+            ok;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+validate_topic(B) when is_binary(B) ->
+    Disallowed =
+        [
+         <<0>>,
+         <<"/">>, % path separators
+         <<"\\">>,
+         <<"*">>,
+         <<".">>, <<"..">>,
+         <<"[">>, <<"]">>,
+         <<"(">>, <<")">>,
+         <<"{">>, <<"}">>
+        ],
+    case binary:match(B, Disallowed) of
+        nomatch ->
+            ok;
+        _ ->
+            {error, invalid_characters}
+    end;
+validate_topic(_) ->
+    {error, non_binary_topic}.
+
 
 -spec write(Topic, Partition, Record) -> ok | {error, any()} when
       Topic :: topic(),
       Partition :: non_neg_integer(),
-      Record :: binary() | record_set().
+      Record :: binary() | record_set() | #{}.
 write(Topic, Partition, Record) when is_binary(Record) ->
     vg_active_segment:write(Topic, Partition, [#{record => Record}]);
+write(Topic, Partition, Record) when is_map(Record) ->
+    vg_active_segment:write(Topic, Partition, [Record]);
+write(Topic, Partition, [Rec | _] = RecordSet) when is_map(Rec) ->
+    vg_active_segment:write(Topic, Partition, RecordSet);
 write(Topic, Partition, RecordSet) when is_list(RecordSet) ->
-    vg_active_segment:write(Topic, Partition, RecordSet).
+    vg_active_segment:write(Topic, Partition,
+                            [#{record => R} || R <- RecordSet]).
 
 fetch(Topic) ->
     fetch(Topic, 0).
@@ -47,15 +84,16 @@ fetch(Topic) ->
                       partition := 0,
                       record_set := record_set()}.
 fetch(Topic, Offset) ->
-    Partition = 0,
-    {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
-    File = vg_utils:log_file(Topic, Partition, SegmentId),
-    Size = filelib:file_size(File),
+    fetch(Topic, 0, Offset, -1).
+
+fetch(Topic, Partition, Offset, Count) ->
+    {_, _, {File, Position, Bytes}} =
+        fetch(Topic, Partition, Offset, 0, Count),
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
-        {ok, [Data]} = file:pread(Fd, [{Position, Size}]),
+        {ok, [Data]} = file:pread(Fd, [{Position, Bytes}]),
         {ok, #{high_water_mark => vg_topics:lookup_hwm(Topic, Partition),
-               partition => 0,
+               partition => Partition,
                record_set => vg_protocol:decode_record_set(Data, [])}}
     after
         file:close(Fd)
