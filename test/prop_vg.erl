@@ -5,7 +5,7 @@
 -define(MODEL, vg_statem).
 
 prop_test() ->
-    ?FORALL(Cmds, commands(?MODEL),
+    ?FORALL(Cmds, more_commands(8, commands(?MODEL)),
             begin
                 lager:start(),
                 lager:set_loglevel(lager_console_backend, error),
