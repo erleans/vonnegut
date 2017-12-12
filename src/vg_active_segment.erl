@@ -36,17 +36,14 @@
 %% need this until an Erlang release with `hibernate_after` spec added to gen option type
 -dialyzer({nowarn_function, start_link/3}).
 
--define(NEW_SERVER(Topic, Partition),
+-define(SERVER(Topic, Partition),
         binary_to_atom(<<Topic/binary, $-,
                          (integer_to_binary(Partition))/binary>>, latin1)).
--define(SERVER(Topic, Partition),
-        binary_to_existing_atom(<<Topic/binary, $-,
-                                  (integer_to_binary(Partition))/binary>>, latin1)).
 
 start_link(Topic, Partition, NextBrick) ->
     %% worth the trouble of making sure we have no acks table on tails?
     Tab = vg_pending_writes:ensure_tab(Topic, Partition),
-    case gen_server:start_link({local, ?NEW_SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab],
+    case gen_server:start_link({local, ?SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab],
                                [{hibernate_after, timer:minutes(5)}]) of % hibernate after 5 minutes with no messages
         {ok, Pid} ->
             {ok, Pid};
