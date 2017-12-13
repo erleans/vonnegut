@@ -2,6 +2,7 @@
 
 -export([encode_fetch/4,
          encode_produce/3,
+         encode_replicate/6,
          encode_request/4,
          encode_metadata_response/2,
          encode_metadata_request/1,
@@ -13,6 +14,7 @@
          encode_string/1,
          encode_bytes/1,
          encode_produce_response/1,
+         encode_replicate_response/1,
          encode_fetch_topic_response/4,
          decode_array/2,
          decode_record_set/1,
@@ -21,6 +23,7 @@
          decode_string/1,
 
          decode_produce_request/1,
+         decode_replicate_request/1,
          decode_fetch_response/1,
          decode_response/1,
          decode_response/2,
@@ -37,6 +40,16 @@ encode_produce(Acks, Timeout, TopicData) when Acks =:= -1
                                             ; Acks =:= 0
                                             ; Acks =:= 1 ->
     [<<Acks:16/signed-integer, Timeout:32/signed-integer>>, encode_topic_data(TopicData)].
+
+encode_replicate(Acks, Timeout, Topic, Partition, ExpectedId, Data) when Acks =:= -1
+                                                                         ; Acks =:= 0
+                                                                         ; Acks =:= 1 ->
+    [<<Acks:16/signed-integer, Timeout:32/signed-integer>>, encode_replicate_topic_data(Topic, Partition, ExpectedId, Data)].
+
+encode_replicate_topic_data(Topic, Partition, ExpectedId, RecordSet) ->
+    RecordSetEncoded = encode_replicate_record_set(RecordSet),
+    [encode_string(Topic), <<Partition:32/signed-integer, ExpectedId:64/signed-integer,
+                             (iolist_size(RecordSetEncoded)):32/signed-integer>>, RecordSetEncoded].
 
 encode_topic_data(TopicData) ->
     encode_array([[encode_string(Topic), encode_data(Data)] || {Topic, Data} <- TopicData]).
@@ -109,6 +122,17 @@ encode_record_set([Record | T]) ->
     Record2 = encode_record(Record),
     [<<0:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2 | encode_record_set(T)].
 
+encode_replicate_record_set([]) ->
+    [];
+encode_replicate_record_set(#{record := Record,
+                              crc := Crc}) ->
+    Record2 = <<Crc:32/unsigned-integer, Record/binary>>,
+    [<<0:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2];
+encode_replicate_record_set([#{record := Record,
+                               crc := Crc} | T]) ->
+    Record2 = <<Crc:32/unsigned-integer, Record/binary>>,
+    [<<0:64/signed-integer, (iolist_size(Record2)):32/signed-integer>>, Record2 | encode_replicate_record_set(T)].
+
 encode_record(Record) ->
     Record2 = [<<?MAGIC:8/signed-integer, 0:8/signed-integer>>, encode_kv(Record)],
     [<<(erlang:crc32(Record2)):32/unsigned-integer>>, Record2].
@@ -170,7 +194,13 @@ encode_produce_response([{Topic, Partitions} | T], Acc) ->
 
 encode_produce_response_partitions(Partitions) ->
     encode_array([<<Partition:32/signed-integer, ErrorCode:16/signed-integer, Offset:64/signed-integer>>
-                     || {Partition, ErrorCode, Offset} <- Partitions]).
+                      || {Partition, ErrorCode, Offset} <- Partitions]).
+
+encode_replicate_response({Partition, ?WRITE_REPAIR, RecordSet}) ->
+    Records = [Record || {_, Record} <- RecordSet],
+    [<<Partition:32/signed-integer, ?WRITE_REPAIR:16/signed-integer, (iolist_size(Records)):32/signed-integer>>, Records];
+encode_replicate_response({Partition, ErrorCode, Offset}) ->
+    <<Partition:32/signed-integer, ErrorCode:16/signed-integer, Offset:64/signed-integer>>.
 
 encode_fetch_topic_response(Partition, ErrorCode, HighWaterMark, Bytes) ->
     <<Partition:32/signed-integer, ErrorCode:16/signed-integer, HighWaterMark:64/signed-integer, Bytes:32/signed-integer>>.
@@ -245,6 +275,13 @@ decode_produce_partitions_request(<<Partition:32/signed-integer, Size:32/signed-
                                     RecordSet:Size/binary, Rest/binary>>) ->
     {{Partition, decode_record_set(RecordSet)}, Rest}.
 
+%% decode replicate
+
+decode_replicate_request(<<Acks:16/signed-integer, Timeout:32/signed-integer, TopicSize:16/signed-integer,
+                           Topic:TopicSize/binary, Partition:32/signed-integer, ExpectedId:64/signed-integer,
+                           RecordSetSize:32/signed-integer, RecordSet:RecordSetSize/binary, _Rest/binary>>) ->
+    {Acks, Timeout, {Topic, Partition, ExpectedId, decode_record_set(RecordSet)}}.
+
 %% decode responses
 
 decode_response(<<Size:32/signed-integer, Record:Size/binary, Rest/binary>>) ->
@@ -259,6 +296,8 @@ decode_response(?FETCH_REQUEST, Response) ->
     decode_fetch_response(Response);
 decode_response(?PRODUCE_REQUEST, Response) ->
     decode_produce_response(Response);
+decode_response(?REPLICATE_REQUEST, Response) ->
+    decode_replicate_response(Response);
 decode_response(?TOPICS_REQUEST, Response) ->
     decode_topics_response(Response);
 decode_response(?METADATA_REQUEST, Response) ->
@@ -329,6 +368,15 @@ decode_produce_response_partitions(<<Partition:32/signed-integer, ErrorCode:16/s
     {{Partition, #{error_code => ErrorCode,
                    offset => Offset}}, Rest};
 decode_produce_response_partitions(_) ->
+    more.
+
+decode_replicate_response(<<Partition:32/signed-integer, ?WRITE_REPAIR:16/signed-integer,
+                            Size:32/signed-integer, RecordSet:Size/binary, _Rest/binary>>) ->
+    {Partition, #{error_code => ?WRITE_REPAIR, records => decode_record_set(RecordSet, [])}};
+decode_replicate_response(<<Partition:32/signed-integer, ErrorCode:16/signed-integer,
+                            Offset:64/signed-integer, _Rest/binary>>) ->
+    {Partition, #{error_code => ErrorCode, offset => Offset}};
+decode_replicate_response(_) ->
     more.
 
 decode_topics_response(<<TopicsCount:32/signed-integer, Msg/binary>>) ->

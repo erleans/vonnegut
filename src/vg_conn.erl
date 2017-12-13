@@ -38,12 +38,8 @@ acceptor_continue(_PeerName, Socket, MRef) ->
     lager:debug("new connection on ~p", [Socket]),
     prometheus_gauge:inc(open_connections),
     case vg_chain_state:role() of
-        middle ->
-            lager:debug("at=new_connection error=client_middle node=~p peer=~p",
-                        [node(), _PeerName]),
-            {error, no_valid_client_operations};
-        unknown ->
-            {error, chain_state_uninitialized};
+        %% undefined ->
+        %%     {error, chain_state_uninitialized};
         Role ->
             lager:debug("at=new_connection node=~p role=~p peer=~p",
                         [node(), Role, _PeerName]),
@@ -221,7 +217,7 @@ handle_request(?FETCH_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signe
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]),
     {error, request_disallowed};
 handle_request(?FETCH2_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
-                                     _MinBytes:32/signed, Rest/binary>>,
+                                      _MinBytes:32/signed, Rest/binary>>,
                CorrelationId, Socket) ->
     {[{Topic, [{Partition, _Offset, _MaxBytes, _Limit} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic2/1, Rest),
     lager:info("at=fetch2_request error=request_disallowed topic=~s partition=~p", [Topic, Partition]),
@@ -233,12 +229,45 @@ handle_request(?FETCH2_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/sign
     Size = erlang:iolist_size(Response) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]),
     {error, request_disallowed};
+handle_request(?REPLICATE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
+    {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
+    Results = [{Topic, [{Partition, ?PRODUCE_DISALLOWED_ERROR, 0}
+                        || {Partition, _MessageSet} <- PartitionData]}
+               || {Topic, PartitionData} <- TopicData],
+    lager:info("at=replicate_request error=replicate_disallowed", []),
+    ReplicateResponse = vg_protocol:encode_produce_response(Results),
+    Size = erlang:iolist_size(ReplicateResponse) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ReplicateResponse]),
+    {error, request_disallowed};
+handle_request(?REPLICATE_REQUEST, _Role, Data, CorrelationId, Socket) ->
+    {_Acks, _Timeout, {Topic, Partition, ExpectedId, MessageSet}} = vg_protocol:decode_replicate_request(Data),
+
+    Response = case vg:write(Topic, Partition, ExpectedId, MessageSet) of
+                   {ok, Offset} ->
+                       {Partition, ?NO_ERROR, Offset};
+                   {write_repair, RepairSet} ->
+                       {Partition, ?WRITE_REPAIR, RepairSet};
+                   {error, socket_closed} ->
+                       {Partition, ?TIMEOUT_ERROR, -1};
+                   {error, pool_timeout} ->
+                       {Partition, ?TIMEOUT_ERROR, -1};
+                   {error, timeout} ->
+                       {Partition, ?TIMEOUT_ERROR, -1}
+               end,
+
+    ReplicateResponse = vg_protocol:encode_replicate_response(Response),
+    Size = erlang:iolist_size(ReplicateResponse) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, ReplicateResponse]);
 handle_request(?PRODUCE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
     Results = [{Topic, [begin
                             case vg:write(Topic, Partition, MessageSet) of
                                 {ok, Offset} ->
                                     {Partition, ?NO_ERROR, Offset};
+                                {error, socket_closed} ->
+                                    {Partition, ?TIMEOUT_ERROR, -1};
+                                {error, pool_timeout} ->
+                                    {Partition, ?TIMEOUT_ERROR, -1};
                                 {error, timeout} ->
                                     {Partition, ?TIMEOUT_ERROR, -1}
                             end

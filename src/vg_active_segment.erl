@@ -4,7 +4,8 @@
 -behaviour(gen_server).
 
 -export([start_link/3,
-         write/3]).
+         write/3,
+         write/4]).
 
 -export([init/1,
          handle_call/3,
@@ -68,17 +69,34 @@ write(Topic, Partition, RecordSet) ->
             R -> R
         end
     catch _:{noproc, _} ->
-            create_retry(Topic, Partition, RecordSet);
+            create_retry(Topic, Partition, head, RecordSet);
           error:badarg ->  %% is this too broad?  how to restrict?
-            create_retry(Topic, Partition, RecordSet);
+            create_retry(Topic, Partition, head, RecordSet);
           exit:{timeout, _} ->
             {error, timeout}
     end.
 
-create_retry(Topic, Partition, RecordSet)->
+write(Topic, Partition, ExpectedId, RecordSet) ->
+    %% there clearly needs to be a lot more logic here.  it's also not
+    %% clear that this is the right place for this
+    try
+        case gen_server:call(?SERVER(Topic, Partition), {write, ExpectedId, RecordSet}) of
+            retry ->
+                write(Topic, Partition, ExpectedId, RecordSet);
+            R -> R
+        end
+    catch _:{noproc, _} ->
+            create_retry(Topic, Partition, ExpectedId, RecordSet);
+          error:badarg ->  %% is this too broad?  how to restrict?
+            create_retry(Topic, Partition, ExpectedId, RecordSet);
+          exit:{timeout, _} ->
+            {error, timeout}
+    end.
+
+create_retry(Topic, Partition, ExpectedId, RecordSet)->
     lager:warning("write to nonexistent topic '~s', creating", [Topic]),
     {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
-    write(Topic, Partition, RecordSet).
+    write(Topic, Partition, ExpectedId, RecordSet).
 
 init([Topic, Partition, NextNode, Tab]) ->
     lager:info("at=init topic=~p next_server=~p", [Topic, NextNode]),
@@ -140,43 +158,23 @@ handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{id = ID,
                             throw({write_repair, WriteRepairSet, State})
                     end
             end,
-        lager:info("write call from ~p", [_From]),
 
         Result =
             case NextBrick of
                 {_, Role} when Role == solo; Role == tail -> proceed;
-                _ ->
-                    (fun Loop(_, _, Remaining) when Remaining =< 0 ->
+                {_, _} ->
+                    (fun Loop(_, Remaining) when Remaining =< 0 ->
                              {error, timeout};
-                         Loop(B, Start, Remaining) ->
-                             {Time, B1} = backoff:fail(B),
-                             case catch gen_server:call(NextBrick,
-                                                        {write, ExpectedID, RecordSet},
-                                                        Remaining) of
+                         Loop(Start, Remaining) ->
+                             case vg_client:replicate(next_brick, Topic, ExpectedID, RecordSet, Remaining) of
                                  retry ->
                                      Now = erlang:monotonic_time(milli_seconds),
                                      Elapsed = Now - Start,
-                                     %% reset backoff
-                                     Loop(backoff:init(2, 100), Now, Remaining - Elapsed);
-                                 %% I think all of these are retryable
-                                 {'EXIT', {noproc, _}} ->
-                                     {_Topic, Server} = NextBrick,
-                                     %% if the remote process is down,
-                                     %% attempt to start it and retry
-                                     _ = vg_topics_sup:start_child(Server, Topic, [Partition], 1),
-                                     timer:sleep(Time),
-                                     Now = erlang:monotonic_time(milli_seconds),
-                                     Elapsed = Now - Start,
-                                     Loop(B1, Now, Remaining - Elapsed);
-                                 {'EXIT', _} ->
-                                     timer:sleep(Time),
-                                     Now = erlang:monotonic_time(milli_seconds),
-                                     Elapsed = Now - Start,
-                                     Loop(B1, Now, Remaining - Elapsed);
+                                     Loop(Now, Remaining - Elapsed);
                                  Result ->
                                      Result
                              end
-                     end)(backoff:init(2, 100), erlang:monotonic_time(milli_seconds), timeout() * 5)
+                     end)(erlang:monotonic_time(milli_seconds), timeout() * 5)
             end,
 
         case Result of
@@ -190,12 +188,7 @@ handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{id = ID,
                 prometheus_counter:inc(write_repairs),
                 %% add in the following when pipelining is added, if it makes sense
                 %% prometheus_gauge:inc(pending_write_repairs, length(RepairSet)),
-                State1 = lists:foldl(
-                           fun({_ID, Data}, S) ->
-                                   %% ideally we could do this without decoding?
-                                   RepSet = vg_protocol:decode_record_set(Data, []),
-                                   write_record_set(RepSet, S)
-                           end, State, RepairSet),
+                State1 = write_record_set(RepairSet, State),
                 case ExpectedID0 of
                     head ->
                         {reply, retry, State1};

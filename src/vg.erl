@@ -2,7 +2,7 @@
 
 -export([create_topic/1,
          ensure_topic/1,
-         write/3,
+         write/3, write/4,
          fetch/1, fetch/2, fetch/4,
          fetch/5]).
 
@@ -73,6 +73,11 @@ write(Topic, Partition, [Rec | _] = RecordSet) when is_map(Rec) ->
 write(Topic, Partition, RecordSet) when is_list(RecordSet) ->
     vg_active_segment:write(Topic, Partition,
                             [#{record => R} || R <- RecordSet]).
+
+write(Topic, Partition, ExpectedId, Record) when is_binary(Record) ->
+    vg_active_segment:write(Topic, Partition, ExpectedId, [#{record => Record}]);
+write(Topic, Partition, ExpectedId, RecordSet) when is_list(RecordSet) ->
+    vg_active_segment:write(Topic, Partition, ExpectedId, RecordSet).
 
 fetch(Topic) ->
     fetch(Topic, 0).
