@@ -8,7 +8,6 @@
 -behaviour(gen_statem).
 
 -export([start_link/0,
-         role/0,
          next/0,
          head/0]).
 
@@ -48,9 +47,6 @@ start_link() ->
 next() ->
     gen_statem:call(?SERVER, next_node).
 
-role() ->
-    gen_statem:call(?SERVER, role).
-
 head() ->
     gen_statem:call(?SERVER, head).
 
@@ -66,8 +62,6 @@ inactive(enter, _, _Data) ->
     prometheus_boolean:set(is_active, false),
     keep_state_and_data;
 inactive({call, From}, next_node, _Data) ->
-    {keep_state_and_data, [{reply, From, undefined}]};
-inactive({call, From}, role, _Data) ->
     {keep_state_and_data, [{reply, From, undefined}]};
 inactive({call, From}, head, _Data) ->
     {keep_state_and_data, [{reply, From, undefined}]};
@@ -148,8 +142,6 @@ active(enter, _, #data{role=Role, replicas=Replicas}) ->
     keep_state_and_data;
 active({call, From}, next_node, #data{next_node=NextNode}) ->
     {keep_state_and_data, [{reply, From, NextNode}]};
-active({call, From}, role, #data{role=Role}) ->
-    {keep_state_and_data, [{reply, From, Role}]};
 active({call, From}, head, #data{head=Head}) ->
     {keep_state_and_data, [{reply, From, Head}]};
 active(info, {next_node_down, NextNode}, Data) ->

@@ -263,19 +263,18 @@ verify_lazy_load(_Config) ->
     {ok, _} = application:ensure_all_started(vonnegut),
     wait_for_start(Topic),
 
-    Name = binary_to_atom(<<Topic/binary, $-, (integer_to_binary(Partition))/binary>>, latin1),
-    ?assertEqual(undefined, erlang:whereis(Name)),
+    ?assertEqual(undefined, gproc:whereis_name({n,l,{Topic, Partition}})),
 
     {ok, #{Topic := #{0 := #{record_set := Reply2}}}} = vg_client:fetch(Topic, 0),
     ?assertEqual(100, length(Reply2)),
 
-    ?assertEqual(undefined, erlang:whereis(Name)),
+    ?assertEqual(undefined, gproc:whereis_name({n,l,{Topic, Partition}})),
 
     %% writing starts the process
     {ok, _}  = vg_client:produce(Topic,
                                  lists:duplicate(100, <<"123456789abcdef">>)),
 
-    ?assertNotEqual(undefined, erlang:whereis(Name)).
+    ?assertNotEqual(undefined, gproc:whereis_name({n,l,{Topic, Partition}})).
 
 local_client_test(Config) ->
     Topic = ?config(topic, Config),

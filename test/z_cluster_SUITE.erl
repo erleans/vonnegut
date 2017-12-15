@@ -194,7 +194,6 @@ groups() ->
       [],
       [
        roles,
-       acks,
        concurrent_fetch,
        id_replication,
        restart
@@ -251,14 +250,6 @@ roles(Config) ->
     ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, Ret2),
 
     shackle_pool:stop(middle_end),
-    Config.
-
-acks(Config) ->
-    {ok, _} = vg_client:ensure_topic(<<"foo">>),
-    [vg_client:produce(<<"foo">>, <<"bar", (integer_to_binary(N))/binary>>)
-     || N <- lists:seq(1, 20)],
-
-    ?assertMatch(ok, check_acks(1000)),
     Config.
 
 concurrent_fetch(_Config) ->
@@ -412,7 +403,7 @@ id_replication(Config) ->
     {_, _, R2} = vg_protocol:decode_produce_request(R1),
     [{_, R3}] = R2,
     [{_, R}] = R3,
-    ?assertMatch({ok, 52}, rpc:call(Tail, gen_server, call, [{'bar-n-0', Tail}, {write, 53, R}, 5000])),
+    ?assertMatch({ok, 52}, rpc:call(Tail, gen_server, call, [{via,gproc,{n,l,{<<"bar-n">>, 0}}}, {write, 53, R}, 5000])),
     %% note that we VVVV succeed with 53 even though the previous writes never went through head
     ?assertMatch({ok, 53}, vg_client:produce(Topic, <<"this should succeed on retry">>)),
     Config.
@@ -505,27 +496,6 @@ concurrent_perf(_Config) ->
     io:fwrite(standard_error, "load ~p ret ~p ~n ~n", [LoadDiff, RetDiff]),
     %%throw(gimmelogs),
     ok.
-
-check_acks(Timeout) when Timeout =< 0 ->
-    {error, timeout};
-check_acks(Timeout) ->
-    Info0 = rpc:call(mkname('chain1-0'), ets, info, [foo0, size]),
-    Info1 = rpc:call(mkname('chain1-1'), ets, info, [foo0, size]),
-    Info2 = rpc:call(mkname('chain1-2'), ets, info, [foo0, size]),
-    ct:pal("ack info: ~p ~p ~p", [Info0, Info1, Info2]),
-
-    case Info0 == 0 andalso Info1 == 0 andalso Info2 == 0 of
-        true -> ok;
-        _ ->
-            timer:sleep(50),
-            check_acks(Timeout - 50)
-    end.
-
-mkname(Name) ->
-    binary_to_atom(
-      iolist_to_binary(
-        [atom_to_list(Name), "@127.0.0.1"]),
-      utf8).
 
 sync_cmd(Name, Cmd, Env) ->
     P = open_port({spawn, Cmd},
