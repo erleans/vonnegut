@@ -175,7 +175,7 @@ wait_for_mgr() ->
 wait_for_mgr(N) when N =:= 50 ->
     timeout;
 wait_for_mgr(N) ->
-    case global:whereis_name(vg_cluster_mgr) of
+    case rpc:call('chain1-0@127.0.0.1', erlang, whereis, [vg_cluster_mgr]) of
         undefined ->
             timer:sleep(50),
             wait_for_mgr(N+1);
