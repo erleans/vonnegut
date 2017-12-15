@@ -29,14 +29,13 @@
                 ref    :: reference(),
                 buffer :: binary()}).
 
-acceptor_init(_SockName, LSocket, []) ->
+acceptor_init(_SockName, LSocket, [Role]) ->
     MRef = monitor(port, LSocket),
-    {ok, MRef}.
+    {ok, {MRef, Role}}.
 
-acceptor_continue(_PeerName, Socket, MRef) ->
+acceptor_continue(_PeerName, Socket, {MRef, Role}) ->
     lager:debug("new connection on ~p", [Socket]),
     prometheus_gauge:inc(open_connections),
-    Role = vg_chain_state:role(),
     lager:debug("at=new_connection node=~p peer=~p role=~p",
                 [node(), _PeerName, Role]),
     gen_server:enter_loop(?MODULE, [], #state{socket = Socket, ref = MRef,

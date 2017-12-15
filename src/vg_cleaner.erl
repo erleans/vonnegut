@@ -19,11 +19,10 @@
                 retention_seconds  :: integer(),
                 t_ref              :: timer:tref()}).
 
-%% -define(SERVER(Topic, Partition), {via, vg_pm, {Role, Topic, Partition}}).
--define(SERVER(Topic, Partition), binary_to_atom(<<"vg_cleaner-", Topic/binary, $-, Partition>>, latin1)).
+-define(SERVER(Topic, Partition), {via, gproc, {n, l, {vg_cleaner, Topic, Partition}}}).
 
 start_link(Topic, Partition) ->
-    gen_server:start_link({local, ?SERVER(Topic, Partition)},
+    gen_server:start_link(?SERVER(Topic, Partition),
                           ?MODULE, [Topic, Partition], []).
 
 run_cleaner(Topic, Partition) ->

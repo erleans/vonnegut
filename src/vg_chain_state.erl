@@ -8,8 +8,8 @@
 -behaviour(gen_statem).
 
 -export([start_link/0,
-         role/0,
-         next/0]).
+         next/0,
+         head/0]).
 
 -export([init/1,
          active/3,
@@ -30,6 +30,7 @@
 -record(data, {
           name         :: chain_name(),
           role         :: role(),
+          head         :: node(),
           cluster_type :: vg_utils:cluster_type(),
           members      :: ordsets:ordset(),
           all_nodes    :: [chain_node()] | undefined,
@@ -46,8 +47,8 @@ start_link() ->
 next() ->
     gen_statem:call(?SERVER, next_node).
 
-role() ->
-    gen_statem:call(?SERVER, role).
+head() ->
+    gen_statem:call(?SERVER, head).
 
 init([]) ->
     ChainName = vg_config:chain_name(),
@@ -62,7 +63,7 @@ inactive(enter, _, _Data) ->
     keep_state_and_data;
 inactive({call, From}, next_node, _Data) ->
     {keep_state_and_data, [{reply, From, undefined}]};
-inactive({call, From}, role, _Data) ->
+inactive({call, From}, head, _Data) ->
     {keep_state_and_data, [{reply, From, undefined}]};
 inactive(state_timeout, connect, Data=#data{name=Name,
                                             replicas=Replicas,
@@ -76,12 +77,14 @@ inactive(state_timeout, connect, Data=#data{name=Name,
         {_P, solo} when is_pid(_P) ->
             lager:info("at=chain_complete role=solo requested_size=1", []),
             lager:info("at=start_cluster_mgr role=solo"),
+            vonnegut_sup:start_acceptor_pool(solo),
             ClientPort = vg_config:port(),
             PartisanPort = application:get_env(partisan, peer_port, 10200),
             [N, H] = string:split(atom_to_list(node()), "@"),
             vonnegut_sup:start_cluster_mgr(solo, [{list_to_atom(N), H, PartisanPort, ClientPort}]),
             {next_state, active, Data#data{members=Members,
                                            role=solo,
+                                           head=node(),
                                            all_nodes=[],
                                            next_node=tail}};
         {_P, undefined} when is_pid(_P) ->
@@ -102,6 +105,8 @@ inactive(state_timeout, connect, Data=#data{name=Name,
                             ok
                     end,
 
+                    vonnegut_sup:start_acceptor_pool(Role),
+
                     %% monitor next link in the chain
                     NextNode = next_node(Role, node(), Members),
                     case string:split(atom_to_list(NextNode), "@") of
@@ -118,6 +123,7 @@ inactive(state_timeout, connect, Data=#data{name=Name,
 
                     lager:info("at=chain_complete requested_size=~p", [Replicas]),
                     {next_state, active, Data#data{members=Members,
+                                                   head=hd(Members),
                                                    all_nodes=AllNodes,
                                                    role=Role,
                                                    next_node=NextNode}};
@@ -136,8 +142,8 @@ active(enter, _, #data{role=Role, replicas=Replicas}) ->
     keep_state_and_data;
 active({call, From}, next_node, #data{next_node=NextNode}) ->
     {keep_state_and_data, [{reply, From, NextNode}]};
-active({call, From}, role, #data{role=Role}) ->
-    {keep_state_and_data, [{reply, From, Role}]};
+active({call, From}, head, #data{head=Head}) ->
+    {keep_state_and_data, [{reply, From, Head}]};
 active(info, {next_node_down, NextNode}, Data) ->
     lager:info("state=active next_node_down=~p", [NextNode]),
     {next_state, inactive, Data, 0}.

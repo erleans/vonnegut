@@ -21,7 +21,7 @@
 
 -record(state, {topic_dir   :: file:filename(),
                 id          :: integer(),
-                next_brick  :: {node(), atom()},
+                next_brick  :: atom(),
                 byte_count  :: integer(),
                 pos         :: integer(),
                 index_pos   :: integer(),
@@ -30,21 +30,16 @@
                 index_fd    :: file:fd(),
                 topic       :: binary(),
                 partition   :: integer(),
-                history_tab :: atom(),
                 config      :: #config{}
                }).
 
 %% need this until an Erlang release with `hibernate_after` spec added to gen option type
 -dialyzer({nowarn_function, start_link/3}).
 
--define(SERVER(Topic, Partition),
-        binary_to_atom(<<Topic/binary, $-,
-                         (integer_to_binary(Partition))/binary>>, latin1)).
+-define(SERVER(Topic, Partition), {via, gproc, {n, l, {Topic, Partition}}}).
 
 start_link(Topic, Partition, NextBrick) ->
-    %% worth the trouble of making sure we have no acks table on tails?
-    Tab = vg_pending_writes:ensure_tab(Topic, Partition),
-    case gen_server:start_link({local, ?SERVER(Topic, Partition)}, ?MODULE, [Topic, Partition, NextBrick, Tab],
+    case gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick],
                                [{hibernate_after, timer:minutes(5)}]) of % hibernate after 5 minutes with no messages
         {ok, Pid} ->
             {ok, Pid};
@@ -84,7 +79,7 @@ create_retry(Topic, Partition, ExpectedId, RecordSet)->
     {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
     write(Topic, Partition, ExpectedId, RecordSet).
 
-init([Topic, Partition, NextNode, Tab]) ->
+init([Topic, Partition, NextNode]) ->
     lager:info("at=init topic=~p next_server=~p", [Topic, NextNode]),
     Config = setup_config(),
     Partition = 0,
@@ -103,7 +98,7 @@ init([Topic, Partition, NextNode, Tab]) ->
     vg_topics:update_hwm(Topic, Partition, Id - 1),
 
     {ok, #state{id = Id,
-                next_brick = {?SERVER(Topic, Partition), NextNode},
+                next_brick = NextNode,
                 topic_dir = TopicDir,
                 byte_count = 0,
                 pos = Position,
@@ -113,8 +108,7 @@ init([Topic, Partition, NextNode, Tab]) ->
                 index_fd = IndexFD,
                 topic = Topic,
                 partition = Partition,
-                config = Config,
-                history_tab = Tab
+                config = Config
                }}.
 
 handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{id = ID,
@@ -147,8 +141,8 @@ handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{id = ID,
 
         Result =
             case NextBrick of
-                {_, Role} when Role == solo; Role == tail -> proceed;
-                {_, _} ->
+                Role when Role == solo; Role == tail -> proceed;
+                _ ->
                     (fun Loop(_, Remaining) when Remaining =< 0 ->
                              {error, timeout};
                          Loop(Start, Remaining) ->
