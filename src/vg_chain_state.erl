@@ -104,6 +104,15 @@ inactive(state_timeout, connect, Data=#data{name=Name,
 
                     %% monitor next link in the chain
                     NextNode = next_node(Role, node(), Members),
+                    case string:split(atom_to_list(NextNode), "@") of
+                        [N, _H] ->
+                            {_, Host, _, Port} = lists:keyfind(list_to_atom(N), 1, AllNodes),
+                            vg_client_pool:start_pool(next_brick, #{ip => Host,
+                                                                    port => Port});
+                        _ ->
+                            ok
+                    end,
+
                     Self = self(),
                     vg_peer_service:on_down(NextNode, fun() -> Self ! {next_node_down, NextNode} end),
 

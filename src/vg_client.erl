@@ -6,6 +6,7 @@
          ensure_topic/1,
          topics/0, topics/2,
          fetch/1, fetch/2, fetch/3,
+         replicate/5,
          produce/2, produce/3,
          init/0,
          setup/2,
@@ -123,6 +124,29 @@ do_fetch(Requests, Timeout) ->
         ocp:finish_span()
     end.
 
+-spec replicate(Pool, Topic, ExpectedId, RecordSet, Timeout)
+             -> {ok, integer()} | {error, term()} | {write_repair, maps:map()} | retry
+                    when Pool :: atom(),
+                         Topic :: vg:topic(),
+                         ExpectedId :: integer(),
+                         RecordSet :: vg:record_set(),
+                         Timeout :: integer().
+replicate(Pool, Topic, ExpectedId, Records, Timeout) ->
+    lager:debug("replicate pool=~p topic=~p", [Pool, Topic]),
+    case scall(fun() -> shackle:call(Pool, {replicate, Topic, 0, ExpectedId, Records}, Timeout) end) of
+        {ok, {0, #{error_code := 0,
+                   offset := Offset}}} ->
+            {ok, Offset};
+        {ok, {0, #{error_code := ?WRITE_REPAIR, records := RecordSet}}} ->
+            {write_repair, RecordSet};
+        {ok, {0, #{error_code := ?TIMEOUT_ERROR}}} ->
+            retry;
+        {ok, {0, #{error_code := ErrorCode}}} ->
+            {error, ErrorCode};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
 -spec produce(Topic, RecordSet)
              -> {ok, integer()} | {error, term()}
                     when Topic :: vg:topic(),
@@ -221,6 +245,20 @@ handle_request({Fetch, TopicOffsets}, #state {
     {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
      State#state{corids = maps:put(RequestId, ?FETCH_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
+handle_request({replicate, Topic, Partition, ExpectedId, Data}, #state {
+                 request_counter = RequestCounter,
+                 corids = CorIds
+                } = State) ->
+
+    RequestId = request_id(RequestCounter),
+    Acks = 0,
+    Timeout = 5000,
+    Request = vg_protocol:encode_replicate(Acks, Timeout, Topic, Partition, ExpectedId, Data),
+    EncodedRequest = vg_protocol:encode_request(?REPLICATE_REQUEST, RequestId, ?CLIENT_ID, Request),
+
+    {ok, RequestId, [<<(iolist_size(EncodedRequest)):32/signed-integer>>, EncodedRequest],
+     State#state{corids = maps:put(RequestId, ?REPLICATE_REQUEST, CorIds),
+                 request_counter = RequestCounter + 1}};
 handle_request({produce, TopicRecords}, #state {
                  request_counter = RequestCounter,
                  corids = CorIds
@@ -294,6 +332,10 @@ scall(_, _, 0) ->
 scall(Thunk, B, Retries) ->
     case Thunk() of
         {error, no_socket} ->
+            {Time, B1} = backoff:fail(B),
+            timer:sleep(Time),
+            scall(Thunk, B1, Retries - 1);
+        {error, socket_closed} ->
             {Time, B1} = backoff:fail(B),
             timer:sleep(Time),
             scall(Thunk, B1, Retries - 1);

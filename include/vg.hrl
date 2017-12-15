@@ -20,12 +20,14 @@
 -define(TOPICS_REQUEST, 1000).
 -define(FETCH2_REQUEST, 1001).
 -define(ENSURE_REQUEST, 1002).
+-define(REPLICATE_REQUEST, 1003).
 
 -define(UNKNOWN_ERROR, -1).
 -define(NO_ERROR, 0).
 -define(TIMEOUT_ERROR, 7).
 -define(FETCH_DISALLOWED_ERROR, 129).
 -define(PRODUCE_DISALLOWED_ERROR, 131).
+-define(WRITE_REPAIR, 133).
 
 -define(SEGMENTS_TABLE, logs_segments_table).
 -define(WATERMARK_TABLE, high_watermarks_table).

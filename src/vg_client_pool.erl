@@ -3,11 +3,9 @@
 -export([start/0, start/1,
          stop/0,
          get_pool/2,
+         start_pool/2,
+         make_pool_name/2,
          refresh_topic_map/0]).
-
--ifdef(TEST).
--export([start_pool/2]).
--endif.
 
 -include("vg.hrl").
 
