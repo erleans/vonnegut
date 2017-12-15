@@ -39,23 +39,26 @@
 
 -spec start_link(vg_chain_state:chain_name(), [vg_chain_state:chain_node()], file:filename_all()) -> {ok, pid()}.
 start_link(ChainName, ChainNodes, DataDir) ->
-    gen_server:start_link({global, ?SERVER}, ?MODULE, [ChainName, ChainNodes, DataDir], []).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [ChainName, ChainNodes, DataDir], []).
 
 %% add chain functionality needed
 
 -spec get_map() -> {Topics :: topics_map(), Chains :: chains_map(), Epoch :: integer()}.
 get_map() ->
-    gen_server:call({global, ?SERVER}, get_map).
+    HeadNode = vg_chain_state:head(),
+    gen_server:call({?SERVER, HeadNode}, get_map).
 
 -spec create_topic(Topic :: binary()) -> {ok, Chain :: binary()} | {error, exists}.
 create_topic(Topic) ->
-    gen_server:call({global, ?SERVER}, {create_topic, Topic}).
+    HeadNode = vg_chain_state:head(),
+    gen_server:call({?SERVER, HeadNode}, {create_topic, Topic}).
 
 -spec ensure_topic(Topic :: binary()) -> {error, chain_not_found} |
                                          {error, topic_exists_other_chain} |
                                          {ok, chain_id()}.
 ensure_topic(Topic) ->
-    gen_server:call({global, ?SERVER}, {ensure_topic, Topic}).
+    HeadNode = vg_chain_state:head(),
+    gen_server:call({?SERVER, HeadNode}, {ensure_topic, Topic}).
 
 init([ChainName, ChainNodes, DataDir]) ->
     Chain = create_chain(ChainName, ChainNodes),
