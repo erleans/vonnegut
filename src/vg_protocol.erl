@@ -80,16 +80,24 @@ encode_metadata_request(Topics) ->
     encode_array([encode_string(Topic) || Topic <- Topics]).
 
 encode_chains(Chains) ->
-    encode_array([<<HeadPort:16/unsigned-integer,
-                    TailPort:16/unsigned-integer,
-                    (iolist_to_binary(
-                       encode_array([encode_string(to_binary(Name)),
-                                     encode_string(HeadHost),
-                                     encode_string(TailHost)])))/binary>>
-                      || #chain{name = Name,
-                                nodes = _Nodes,
-                                head = {HeadHost, HeadPort},
-                                tail = {TailHost, TailPort}} <- Chains]).
+    encode_array([begin
+                      Start = maybe_convert(Start0),
+                      End = maybe_convert(End0),
+                      <<HeadPort:16/unsigned-integer,
+                        TailPort:16/unsigned-integer,
+                        (iolist_to_binary(
+                           encode_array([encode_string(to_binary(Name)),
+                                         encode_string(Start),
+                                         encode_string(End),
+                                         encode_string(HeadHost),
+                                         encode_string(TailHost)])))/binary>>
+                  end
+                  || #chain{name = Name,
+                            nodes = _Nodes,
+                            topics_start = Start0,
+                            topics_end = End0,
+                            head = {HeadHost, HeadPort},
+                            tail = {TailHost, TailPort}} <- Chains]).
 
 %% generic encode functions
 
@@ -386,11 +394,30 @@ decode_topics_response(<<TopicsCount:32/signed-integer, Msg/binary>>) ->
 decode_chain(<<HeadPort:16/unsigned-integer,
                TailPort:16/unsigned-integer,
                Array/binary>>) ->
-    {[Name, HeadHost, TailHost], Rest} = decode_array(fun decode_string/1, Array),
+    {[Name, Start0, End0, HeadHost, TailHost], Rest} = decode_array(fun decode_string/1, Array),
+    Start = maybe_deconvert(Start0),
+    End = maybe_deconvert(End0),
     {#{name => Name,
+       topics_start => Start,
+       topics_end => End,
        head => {HeadHost, HeadPort},
        tail => {TailHost, TailPort}},
      Rest}.
+
+maybe_convert(start_space) ->
+    <<"$$start_space">>;
+maybe_convert(end_space) ->
+    <<"$$end_space">>;
+maybe_convert(B) when is_binary(B) ->
+    B.
+
+%% split these to unconfuse dialyzer
+maybe_deconvert(<<"$$start_space">>) ->
+    start_space;
+maybe_deconvert(<<"$$end_space">>) ->
+    end_space;
+maybe_deconvert(B) when is_binary(B) ->
+    B.
 
 decode_fetch_response(Msg) ->
     case decode_array(fun decode_fetch_topic/1, Msg) of

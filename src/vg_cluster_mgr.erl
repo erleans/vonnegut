@@ -134,14 +134,19 @@ start_on_all_nodes(Topic, Chain, Chains) ->
          {error, Reason} -> exit({error, Reason})
      end || Node <- Nodes].
 
+%% TODO: the topic space stuff MUST be fixed before multiple chains are supported
 create_chain(Name, []) ->
     #chain{name  = Name,
            nodes = [node()],
+           topics_start = start_space,
+           topics_end = end_space,
            head  = {"127.0.0.1", 5555},
            tail  = {"127.0.0.1", 5555}};
 create_chain(Name, Nodes) ->
     #chain{name  = Name,
            nodes = [nodename(Node) || Node <- Nodes],
+           topics_start = start_space, % only valid for one chain
+           topics_end = end_space,     % only valid for one chain
            head  = head(Nodes),
            tail  = tail(Nodes)}.
 
