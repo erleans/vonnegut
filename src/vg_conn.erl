@@ -25,27 +25,22 @@
 -type limited_partition() :: {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 
 -record(state, {socket :: inets:socket(),
-                role   :: head | tail, %% middle disconnects
+                role   :: head | tail | undefined, %% middle disconnects
                 ref    :: reference(),
                 buffer :: binary()}).
 
 acceptor_init(_SockName, LSocket, []) ->
-    % monitor listen socket to gracefully close when it closes
     MRef = monitor(port, LSocket),
     {ok, MRef}.
 
 acceptor_continue(_PeerName, Socket, MRef) ->
     lager:debug("new connection on ~p", [Socket]),
     prometheus_gauge:inc(open_connections),
-    case vg_chain_state:role() of
-        %% undefined ->
-        %%     {error, chain_state_uninitialized};
-        Role ->
-            lager:debug("at=new_connection node=~p role=~p peer=~p",
-                        [node(), Role, _PeerName]),
-            gen_server:enter_loop(?MODULE, [], #state{socket = Socket, ref = MRef,
-                                                      role = Role, buffer = <<>>})
-    end.
+    Role = vg_chain_state:role(),
+    lager:debug("at=new_connection node=~p peer=~p role=~p",
+                [node(), _PeerName, Role]),
+    gen_server:enter_loop(?MODULE, [], #state{socket = Socket, ref = MRef,
+                                              role = Role, buffer = <<>>}).
 
 acceptor_terminate(Reason, _) ->
     % Something went wrong. Either the acceptor_pool is terminating or the
@@ -64,6 +59,9 @@ handle_call(Req, _, State) ->
 handle_cast(Req, State) ->
     {stop, {bad_cast, Req}, State}.
 
+handle_info({tcp, _Socket, _Data}, State=#state{role=undefined}) ->
+    lager:info("request received while role undefined"),
+    {stop, undefined_role, State};
 handle_info({tcp, Socket, Data}, State=#state{socket=Socket,
                                               role=Role,
                                               buffer=Buffer}) ->

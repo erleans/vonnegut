@@ -231,6 +231,8 @@ roles(Config) ->
     %% try to do a read on the head
     {ok, WritePool} = vg_client_pool:get_pool(Topic, write),
     {ok, ReadPool} = vg_client_pool:get_pool(Topic, read),
+    vg_client_pool:start_pool(middle_end, #{ip => "127.0.0.1", port => 5556,
+                                            reconnect => false}),
 
     {ok, R} = shackle:call(WritePool, {fetch, [{Topic, [{0, 12, 100}]}]}),
     ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, R),
@@ -241,14 +243,12 @@ roles(Config) ->
     %% try to do a write on the tail
     {ok, R1} =  shackle:call(ReadPool, {produce, [{Topic, [{0, [<<"bar3000">>, <<"barn_owl">>]}]}]}),
     ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, R1),
-    vg_client_pool:start_pool(middle_end, #{ip => "127.0.0.1", port => 5556,
-                                            reconnect => false}),
 
-    %% try to connect the middle of the chain
-    %% Ret = shackle:call(middle_end, {fetch, [{Topic, [{0, 12, 100}]}]}),
-    %% ?assert(Ret =:= {error, socket_closed} orelse
-    %%         Ret =:= {error, no_socket} orelse
-    %%         Ret =:= {error, timeout}),
+    %% try to do a read and write the middle of the chain
+    {ok, Ret} = shackle:call(middle_end, {fetch, [{Topic, [{0, 12, 100}]}]}),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, Ret),
+    {ok, Ret2} =  shackle:call(middle_end, {produce, [{Topic, [{0, [<<"bar3000">>, <<"barn_owl">>]}]}]}),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, Ret2),
 
     shackle_pool:stop(middle_end),
     Config.

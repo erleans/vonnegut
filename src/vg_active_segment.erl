@@ -60,21 +60,7 @@ start_link(Topic, Partition, NextBrick) ->
       RecordSet :: vg:record_set(),
       Offset :: integer().
 write(Topic, Partition, RecordSet) ->
-    %% there clearly needs to be a lot more logic here.  it's also not
-    %% clear that this is the right place for this
-    try
-        case gen_server:call(?SERVER(Topic, Partition), {write, head, RecordSet}) of
-            retry ->
-                write(Topic, Partition, RecordSet);
-            R -> R
-        end
-    catch _:{noproc, _} ->
-            create_retry(Topic, Partition, head, RecordSet);
-          error:badarg ->  %% is this too broad?  how to restrict?
-            create_retry(Topic, Partition, head, RecordSet);
-          exit:{timeout, _} ->
-            {error, timeout}
-    end.
+    write(Topic, Partition, head, RecordSet).
 
 write(Topic, Partition, ExpectedId, RecordSet) ->
     %% there clearly needs to be a lot more logic here.  it's also not
