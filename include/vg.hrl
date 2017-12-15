@@ -24,7 +24,10 @@
 
 -define(UNKNOWN_ERROR, -1).
 -define(NO_ERROR, 0).
+-define(NOT_LEADER_ERROR, 6).  % reusing this to mean topic map has chaned
 -define(TIMEOUT_ERROR, 7).
+
+%% non-kafka extensions
 -define(FETCH_DISALLOWED_ERROR, 129).
 -define(PRODUCE_DISALLOWED_ERROR, 131).
 -define(WRITE_REPAIR, 133).
@@ -38,6 +41,8 @@
 -record(chain, {
           name  :: binary() | atom(),
           nodes :: [atom()] | undefined,
+          topics_start :: binary() | start_space | undefined, % undef required because there's no way
+          topics_end :: binary() | end_space | undefined,     % to encode these in metadata :\
           head  :: {inet:ip_address() | inet:hostname(), inet:port_number()},
           tail  :: {inet:ip_address() | inet:hostname(), inet:port_number()}
          }).

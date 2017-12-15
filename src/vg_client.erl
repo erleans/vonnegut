@@ -85,8 +85,8 @@ do_fetch(Requests, Timeout) ->
                                   _ ->
                                       Acc#{Pool => [R]}
                               end;
-                          {error, not_found} ->
-                              throw({error, {Topic, not_found}})
+                          {error, Reason} ->
+                              throw({error, Reason})
                       end
               end, #{}, Requests),
         %% should we do these in parallel?
