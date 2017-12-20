@@ -90,6 +90,7 @@ do_fetch(Requests, Timeout) ->
                       end
               end, #{}, Requests),
         %% should we do these in parallel?
+        Restart = application:get_env(vonnegut, swap_restart, true),
         Resps = maps:map(
                   fun(Pool, TPO0) ->
                           TPO = [begin
@@ -99,6 +100,24 @@ do_fetch(Requests, Timeout) ->
                                  end
                                  || {Topic, Position, Opts} <- TPO0],
                           case scall(fun() -> shackle:call(Pool, {fetch2, TPO}, Timeout) end) of
+                              %% sometimes because of cloud orchestration, and
+                              %% restarts, head and tail nodes will switch or
+                              %% move around in time for us to reconnect to them
+                              %% in error, so if we get these codes, start over
+                              {ok, Map} when is_map(Map) andalso Restart =:= true ->
+                                  case maps:fold(
+                                         fun(_, _, true) ->
+                                                 true;
+                                            (_, #{0 := #{error_code := ?FETCH_DISALLOWED_ERROR}}, _) ->
+                                                 true;
+                                            (_, _, _) ->
+                                                 false
+                                         end, false, Map) of
+                                      true ->
+                                          throw(restart);
+                                      _ ->
+                                          {ok, Map}
+                                  end;
                               {ok, Result} ->
                                   %% if there are any error codes in any
                                   %% of these, transform the whole thing
@@ -119,7 +138,11 @@ do_fetch(Requests, Timeout) ->
           {ok, #{}}, maps:to_list(Resps))
     catch throw:{error, {Topic, not_found}} ->
             lager:error("tried to fetch from non-existent topic ~p", [Topic]),
-            {error, {Topic, not_found}}
+            {error, {Topic, not_found}};
+          throw:restart ->
+            lager:info("disallowed request error, restarting pools"),
+            vg_client_pool:restart(),
+            do_fetch(Requests, Timeout)
     after
         ocp:finish_span()
     end.
@@ -166,12 +189,22 @@ produce(Topic, RecordSet, Timeout) ->
             {ok, Pool} ->
                 lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
                 TopicRecords = [{Topic, [{0, RecordSet}]}],
+                Restart = application:get_env(vonnegut, swap_restart, true),
                 case scall(fun() -> shackle:call(Pool, {produce, TopicRecords}, Timeout) end) of
                     {ok, #{Topic := #{0 := #{error_code := 0,
                                              offset := Offset}}}} ->
                         {ok, Offset};
                     {ok, #{Topic := #{0 := #{error_code := ?TIMEOUT_ERROR}}}} ->
                         {error, timeout};
+                    %% sometimes because of cloud orchestration, and
+                    %% restarts, head and tail nodes will switch or
+                    %% move around in time for us to reconnect to them
+                    %% in error, so if we get these codes, start over
+                    {ok, #{Topic := #{0 := #{error_code := ?PRODUCE_DISALLOWED_ERROR}}}}
+                      when Restart =:= true ->
+                        lager:info("disallowed request error, restarting pools"),
+                        vg_client_pool:restart(),
+                        produce(Topic, RecordSet, Timeout);
                     {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
                         {error, ErrorCode};
                     {error, Reason} ->

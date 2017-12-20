@@ -2,6 +2,7 @@
 
 -export([start/0, start/1,
          stop/0,
+         restart/0,
          get_pool/2,
          start_pool/2,
          make_pool_name/2,
@@ -15,6 +16,8 @@ start() ->
     start(#{}).
 
 start(Opts) ->
+    %% so restarts won't lose settings
+    application:set_env(vonnegut, global_pool_opts, Opts),
     start(Opts, 0).
 
 start(_Opts, 10) ->
@@ -167,4 +170,8 @@ stop() ->
      || Pool <- application:get_env(vonnegut, client_pools, [])],
     application:stop(shackle).
 
+restart() ->
+    stop(),
+    Opts = application:get_env(vonnegut, global_pool_opts, #{}),
+    start(Opts).
 %%%%%%%%%%%%%%%%%%
