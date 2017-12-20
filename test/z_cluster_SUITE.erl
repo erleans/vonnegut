@@ -18,40 +18,13 @@ init_per_suite(Config) ->
     application:set_env(vonnegut, client_pool_size, 2),
 
     %% start several nodes
-    ErlFlags = "-config ../../../../cluster/sys.config",
-
-    CodePath = code:get_path(),
     Nodes0 =
         [begin
-             N = integer_to_list(N0),
-             Name = test_node(N),
-             Args = [{kill_if_fail, true},
-                     {monitor_master, true},
-                     {init_timeout, 3000},
-                     {startup_timeout, 3000},
-                     {startup_functions,
-                      [{code, set_path, [CodePath]},
-                       {application, load, [lager]},
-                       {application, set_env,
-                        [lager, handlers,
-                         [{lager_console_backend, [{level, debug}]},
-                          {lager_file_backend,
-                           [{file, "log/console"++N++".log"}, {level, debug}]}]]},
-                       {application, ensure_all_started, [lager]},
-                       {application, load, [partisan]},
-                       {application, set_env, [partisan, peer_ip, {127,0,0,1}]},
-                       {application, set_env, [partisan, peer_port, 15555+N0]},
-                       {application, set_env, [partisan, gossip_interval, 500]},
-                       {application, load, [vonnegut]},
-                       {application, set_env, [vonnegut, chain, chain(5555+N0)]},
-                       {application, set_env, [vonnegut, client_pool_size, 2]},
-                       {application, set_env, [vonnegut, http_port, 8000+N0]},
-                       {application, set_env,
-                        [vonnegut, log_dirs, ["data/node" ++ N ++ "/"]]},
-                       {application, ensure_all_started, [vonnegut]}]},
-                     {erl_flags, ErlFlags}],
+             Name = test_node(integer_to_list(N0)),
+             Args = make_args(false, N0),
+             IArgs = make_args(true, N0),
              {ok, HostNode} = ct_slave:start(Name, Args),
-             {HostNode, {Name, Args}}
+             {HostNode, {Name, {Args, IArgs}}}
          end
          || N0 <- lists:seq(0, ?NUM_NODES - 1)],
     {Nodes, RestartInfos} = lists:unzip(Nodes0),
@@ -63,6 +36,47 @@ init_per_suite(Config) ->
     [{nodes, Nodes},
      {restart, RestartInfos}
      | Config].
+
+make_args(Inverse, N0) ->
+    N = integer_to_list(N0),
+
+    ErlFlags = "-config ../../../../cluster/sys.config",
+
+    CodePath = code:get_path(),
+
+    Chain = case Inverse of
+                true ->
+                    chain(5555 + N0);
+                false ->
+                    inverse_chain(5557 - N0)
+            end,
+    [{kill_if_fail, true},
+     {monitor_master, true},
+     {init_timeout, 3000},
+     {startup_timeout, 3000},
+     {startup_functions,
+      [{code, set_path, [CodePath]},
+       {application, load, [lager]},
+       {application, set_env,
+        [lager, handlers,
+         [{lager_console_backend, [{level, debug}]},
+          {lager_file_backend,
+           [{file, "log/console"++N++".log"}, {level, debug}]}]]},
+       {application, ensure_all_started, [lager]},
+       {application, load, [partisan]},
+       {application, set_env, [partisan, peer_ip, {127,0,0,1}]},
+       {application, set_env, [partisan, peer_port, 15555+N0]},
+       {application, set_env, [partisan, gossip_interval, 500]},
+       {application, load, [vonnegut]},
+       {application, set_env, [vonnegut, chain, Chain]},
+       {application, set_env, [vonnegut, client_pool_size, 2]},
+       {application, set_env, [vonnegut, http_port, 8000+N0]},
+       {application, set_env,
+        [vonnegut, log_dirs, ["data/node" ++ N ++ "/"]]},
+       {application, ensure_all_started, [vonnegut]}]},
+     {erl_flags, ErlFlags}].
+
+
 
 wait_for_nodes(_Nodes, 0) ->
     error(too_slow);
@@ -83,6 +97,15 @@ chain(N) ->
      {discovery, {direct, [{'chain1-0', "127.0.0.1", 15555, 5555},
                            {'chain1-1', "127.0.0.1", 15556, 5556},
                            {'chain1-2', "127.0.0.1", 15557, 5557}
+                          ]}},
+     {replicas, ?NUM_NODES},
+     {port, N}].
+
+inverse_chain(N) ->
+    [{name, chain1},
+     {discovery, {direct, [{'chain1-0', "127.0.0.1", 15555, 5557},
+                           {'chain1-1', "127.0.0.1", 15556, 5556},
+                           {'chain1-2', "127.0.0.1", 15557, 5555}
                           ]}},
      {replicas, ?NUM_NODES},
      {port, N}].
@@ -147,10 +170,26 @@ init_per_group(_, Config) ->
 end_per_group(_, _) ->
     ok.
 
+init_per_testcase(roles_w_reconnect, Config) ->
+    application:load(vonnegut),
+    application:start(shackle),
+    start_lager(),
+    %% wait for the cluster manager to be up before starting the pools
+    case wait_for_mgr() of
+        ok ->
+            application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
+            %% start so we can test we get the errors first
+            application:set_env(vonnegut, swap_restart, false),
+            ok = vg_client_pool:start(),
+            timer:sleep(750),
+            Config;
+        _ ->
+            error(vg_cluster_mgr_timeout)
+    end;
 init_per_testcase(_TestCase, Config) ->
     application:load(vonnegut),
     application:start(shackle),
-    %% start_lager(),
+    start_lager(),
     %% swap_lager(?config(nodes, Config)),
     %% wait for the cluster manager to be up before starting the pools
     case wait_for_mgr() of
@@ -188,7 +227,8 @@ groups() ->
      {init,
       [],
       [
-       bootstrap
+       bootstrap,
+       healthcheck
       ]},
      {operations,
       [],
@@ -196,7 +236,10 @@ groups() ->
        roles,
        concurrent_fetch,
        id_replication,
-       restart
+       restart,
+       %% this needs to be at the end, I think, or it might hork the
+       %% rest of the tests
+       roles_w_reconnect
       ]}
 
     ].
@@ -218,6 +261,23 @@ bootstrap(Config) ->
     ?assertMatch(#{<<"foo">> := #{0 := #{record_set := [#{record := <<"bar">>}]}}}, R1),
     Config.
 
+healthcheck(Config) ->
+    [begin
+         ?assertMatch({ok,{{"HTTP/1.1", 200, "OK"},
+                           [{"connection", "Keep-Alive"},
+                            {"content-length", "14"}],
+                           "It's all good."}},
+                      httpc:request("http://127.0.0.1:800" ++ integer_to_list(N) ++ "/_health")),
+         ?assertMatch({ok,{{"HTTP/1.1", 404, "Not Found"},
+                           [{"connection", "Keep-Alive"},
+                            {"content-length", "9"}],
+                           "Not Found"}},
+                      httpc:request("http://127.0.0.1:800" ++ integer_to_list(N)))
+
+     end
+     || N <- lists:seq(0, ?NUM_NODES - 1)],
+    Config.
+
 roles(Config) ->
     Topic = <<"foo">>,
     {ok, _} = vg_client:ensure_topic(Topic),
@@ -225,7 +285,7 @@ roles(Config) ->
     [vg_client:produce(Topic, <<"bar", (integer_to_binary(N))/binary>>)
      || N <- lists:seq(1, 20)],
     timer:sleep(100),
-    {ok, #{<<"foo">> := #{0 := #{record_set := _ }}}} = vg_client:fetch(Topic),
+    {ok, #{Topic := #{0 := #{record_set := _ }}}} = vg_client:fetch(Topic),
 
     %% try to do a read on the head
     {ok, WritePool} = vg_client_pool:get_pool(Topic, write),
@@ -250,6 +310,54 @@ roles(Config) ->
     ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, Ret2),
 
     shackle_pool:stop(middle_end),
+    Config.
+
+roles_w_reconnect(Config) ->
+    Nodes = ?config(nodes, Config),
+    Restarts = ?config(restart, Config),
+
+    [begin
+         %% make a lot of topics and add a few things to them to delay restart
+         Topic = <<"bar", (integer_to_binary(N))/binary>>,
+         {ok, _} = vg_client:ensure_topic(Topic),
+         vg_client:produce(Topic, [<<"baz", (integer_to_binary(T))/binary>>
+                                       || T <- lists:seq(1, 50)])
+     end
+     || N <- lists:seq(1, 20)],
+
+    [begin
+         ?assertMatch({ok, _}, ct_slave:stop(Node))
+     end
+     || Node <- Nodes],
+    ct:pal("nodes() ~p", [nodes()]),
+    timer:sleep(1000),
+    %% restart the nodes with the ports inverted so we'll reconnect to
+    %% the wrong nodes and get disallowed errors.  We can test failure
+    %% and reconnect modes.
+    Nodes1 =
+        [begin
+             {ok, Node} = ct_slave:start(Name, IArgs),
+             Node
+         end
+         || {Name, {_Args, IArgs}} <- Restarts],
+    swap_lager(Nodes1),
+    _ = ct_cover:add_nodes(Nodes1),
+
+    wait_for_nodes(Nodes1, 50), % wait a max of 5s
+    timer:sleep(2000),
+    %% ok = wait_for_start(fun() -> vg_client:produce(<<"bar4">>, 0, 1) end),
+
+    ?assertMatch({error, 131}, vg_client:produce(<<"bar4">>, <<"ASDASDASDASDASDASDA">>)),
+    %% not sure that I like the inconsistency here
+    ?assertMatch({ok, #{<<"bar4">> := #{0 := #{error_code := 129}}}},
+                 vg_client:fetch(<<"bar4">>, 0, 1)),
+
+    %% set reconnection on, it's checked dynamically
+    application:set_env(vonnegut, swap_restart, true),
+
+    ?assertMatch({ok, 103}, vg_client:produce(<<"bar4">>, <<"ASDASDASDASDASDASDA">>)),
+    ?assertMatch({ok, #{<<"bar4">> := #{0 := #{error_code := 0}}}},
+                  vg_client:fetch(<<"bar4">>, 0, 1)),
     Config.
 
 concurrent_fetch(_Config) ->
@@ -313,7 +421,7 @@ restart(Config) ->
              {ok, Node} = ct_slave:start(Name, Args),
              Node
          end
-         || {Name, Args} <- Restarts],
+         || {Name, {Args, _IArgs}} <- Restarts],
     swap_lager(Nodes1),
     _ = ct_cover:add_nodes(Nodes1),
 
@@ -328,9 +436,9 @@ restart(Config) ->
 
     %% shut down each node in turn
     [Head, Middle, Tail] = Nodes1,
-    [{HeadName, HeadArgs},
-     {MiddleName, MiddleArgs},
-     {TailName, TailArgs}] = Restarts,
+    [{HeadName, {HeadArgs, _}},
+     {MiddleName, {MiddleArgs, _}},
+     {TailName, {TailArgs, _}}] = Restarts,
 
     {ok, _} = ct_slave:stop(Head),
     timer:sleep(1000),
