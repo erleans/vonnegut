@@ -110,6 +110,8 @@ do_fetch(Requests, Timeout) ->
                                                  true;
                                             (_, #{0 := #{error_code := ?FETCH_DISALLOWED_ERROR}}, _) ->
                                                  true;
+                                            (T, #{0 := #{error_code := ?UNKNOWN_TOPIC_OR_PARTITION}}, _) ->
+                                                 throw({error, {T, not_found}});
                                             (_, _, _) ->
                                                  false
                                          end, false, Map) of

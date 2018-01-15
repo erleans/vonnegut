@@ -24,6 +24,7 @@
 
 -define(UNKNOWN_ERROR, -1).
 -define(NO_ERROR, 0).
+-define(UNKNOWN_TOPIC_OR_PARTITION, 3).
 -define(NOT_LEADER_ERROR, 6).  % reusing this to mean topic map has chaned
 -define(TIMEOUT_ERROR, 7).
 

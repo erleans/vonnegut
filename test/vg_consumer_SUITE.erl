@@ -7,7 +7,7 @@
 -include("test_utils.hrl").
 
 all() ->
-    [from_zero, multi_topic_fetch].
+    [from_zero, multi_topic_fetch, fetch_unknown].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -90,5 +90,16 @@ multi_topic_fetch(_Config) ->
 
     ?assertEqual(1, HWM2),
     ?assertMatch([#{id := 1, record := <<"topic 2 record 2">>}], Data2),
+
+    ok.
+
+fetch_unknown(_Config) ->
+    Topic = vg_test_utils:create_random_name(<<"consumer_SUITE_test_topic">>),
+
+    %% make sure there's enough time for the
+    %% listeners to come up
+    timer:sleep(250),
+
+    ?assertMatch({error, {Topic, not_found}}, vg_client:fetch(Topic, 0)),
 
     ok.

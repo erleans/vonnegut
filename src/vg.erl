@@ -148,9 +148,12 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
             _ -> min(SendBytes, MaxBytes)
         end,
     ErrorCode = 0,
-    HighWaterMark = vg_topics:lookup_hwm(Topic, Partition),
-    Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HighWaterMark, Bytes),
+    case vg_topics:lookup_hwm(Topic, Partition) of
+        {error, not_found} ->
+            {error, not_found};
+        HighWaterMark ->
+            Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HighWaterMark, Bytes),
 
-    lager:debug("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
-    {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}.
-
+            lager:debug("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
+            {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}
+    end.
