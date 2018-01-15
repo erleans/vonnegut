@@ -36,7 +36,11 @@ insert_hwm(Topic, Partition, HWM) ->
     ets:insert(?WATERMARK_TABLE, {{Topic, Partition}, HWM}).
 
 lookup_hwm(Topic, Partition) ->
-    ets:lookup_element(?WATERMARK_TABLE, {Topic, Partition}, ?HWM_POS).
+    try ets:lookup_element(?WATERMARK_TABLE, {Topic, Partition}, ?HWM_POS)
+    catch
+        error:badarg ->
+            throw({topic_not_found, Topic, Partition})
+    end.
 
 update_hwm(Topic, Partition, HWMUpdate) ->
     true = ets:update_element(?WATERMARK_TABLE, {Topic, Partition}, {?HWM_POS, HWMUpdate}).

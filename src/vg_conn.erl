@@ -193,13 +193,25 @@ handle_request(FetchType, Role, <<_ReplicaId:32/signed-integer, _MaxWaitTime:32/
                    ?FETCH2_REQUEST -> fun decode_topic2/1
                end,
     {TopicPartitions, _} = vg_protocol:decode_array(DecodeFn, Rest),
-    {Size, FetchResults}
-        = lists:foldl(fun({Topic, Partitions}, {SizeAcc, ResponseAcc}) ->
-                          {S, R} = fetch(Topic, Partitions),
-                          {S + SizeAcc, ResponseAcc ++ R}
-                      end, {4, [<<(length(TopicPartitions)):32/signed-integer>>]}, TopicPartitions),
-    gen_tcp:send(Socket, <<(Size+4):32/signed-integer, CorrelationId:32/signed-integer>>),
-    do_send(FetchResults, Socket);
+    try
+        {Size, FetchResults}
+            = lists:foldl(fun({Topic, Partitions}, {SizeAcc, ResponseAcc}) ->
+                                  {S, R} = fetch(Topic, Partitions),
+                                  {S + SizeAcc, ResponseAcc ++ R}
+                          end, {4, [<<(length(TopicPartitions)):32/signed-integer>>]}, TopicPartitions),
+        gen_tcp:send(Socket, <<(Size+4):32/signed-integer, CorrelationId:32/signed-integer>>),
+        do_send(FetchResults, Socket)
+    catch
+        throw:{topic_not_found, Topic, Partition} ->
+            Response = vg_protocol:encode_array([[vg_protocol:encode_string(Topic),
+                                                  vg_protocol:encode_array([vg_protocol:encode_fetch_topic_response(Partition,
+                                                                                                                    ?UNKNOWN_TOPIC_OR_PARTITION,
+                                                                                                                    0,
+                                                                                                                    0)])]]),
+            ResponseSize = erlang:iolist_size(Response) + 4,
+            gen_tcp:send(Socket, [<<ResponseSize:32/signed, CorrelationId:32/signed>>, Response]),
+            {error, topic_not_found}
+    end;
 handle_request(?FETCH_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signed,
                                      _MinBytes:32/signed, Rest/binary>>,
                CorrelationId, Socket) ->
