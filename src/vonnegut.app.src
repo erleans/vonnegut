@@ -1,6 +1,6 @@
 {application, vonnegut,
  [{description, "Replicated append-only log."},
-  {vsn, git},
+  {vsn, "0.7.2"},
   {registered, []},
   {mod, {vonnegut_app, []}},
   {applications,
