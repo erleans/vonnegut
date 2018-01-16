@@ -18,13 +18,6 @@
 
 start(_StartType, _StartArgs) ->
     init_tables(),
-    Topics = vg_utils:topics_on_disk(),
-    Partition = 0,
-    lists:map(fun({Topic, _}) ->
-                      TopicDir = vg_utils:topic_dir(Topic, Partition),
-                      {Id, _, _} = vg_log_segments:find_latest_id(TopicDir, Topic, Partition),
-                      vg_topics:insert_hwm(Topic, Partition, Id - 1)
-              end, Topics),
     vonnegut_sup:start_link().
 
 

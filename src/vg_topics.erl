@@ -39,8 +39,14 @@ lookup_hwm(Topic, Partition) ->
     try ets:lookup_element(?WATERMARK_TABLE, {Topic, Partition}, ?HWM_POS)
     catch
         error:badarg ->
-            throw({topic_not_found, Topic, Partition})
+            %% maybe just not loaded, try to get from disk first
+            vg_log_segments:load_existing(Topic, Partition)
     end.
 
 update_hwm(Topic, Partition, HWMUpdate) ->
-    true = ets:update_element(?WATERMARK_TABLE, {Topic, Partition}, {?HWM_POS, HWMUpdate}).
+    try
+        true = ets:update_element(?WATERMARK_TABLE, {Topic, Partition}, {?HWM_POS, HWMUpdate})
+    catch
+        error:badarg ->
+            throw(hwm_table_not_loaded)
+    end.
