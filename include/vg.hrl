@@ -32,6 +32,7 @@
 -define(FETCH_DISALLOWED_ERROR, 129).
 -define(PRODUCE_DISALLOWED_ERROR, 131).
 -define(WRITE_REPAIR, 133).
+-define(REPLICATE_DISALLOWED_ERROR, 135).
 
 -define(SEGMENTS_TABLE, logs_segments_table).
 -define(WATERMARK_TABLE, high_watermarks_table).
