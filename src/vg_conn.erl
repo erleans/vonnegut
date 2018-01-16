@@ -238,13 +238,9 @@ handle_request(?FETCH2_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/sign
     Size = erlang:iolist_size(Response) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]),
     {error, request_disallowed};
-handle_request(?REPLICATE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
-    {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
-    Results = [{Topic, [{Partition, ?PRODUCE_DISALLOWED_ERROR, 0}
-                        || {Partition, _MessageSet} <- PartitionData]}
-               || {Topic, PartitionData} <- TopicData],
+handle_request(?REPLICATE_REQUEST, Role, _Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
     lager:info("at=replicate_request error=replicate_disallowed", []),
-    ReplicateResponse = vg_protocol:encode_produce_response(Results),
+    ReplicateResponse = vg_protocol:encode_replicate_response({0, ?REPLICATE_DISALLOWED_ERROR, -1}),
     Size = erlang:iolist_size(ReplicateResponse) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ReplicateResponse]),
     {error, request_disallowed};
