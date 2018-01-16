@@ -23,8 +23,10 @@ start(_StartType, _StartArgs) ->
     lists:map(fun({Topic, _}) ->
                       TopicDir = vg_utils:topic_dir(Topic, Partition),
                       {Id, _, _} = vg_log_segments:find_latest_id(TopicDir, Topic, Partition),
+                      lager:info("inserting hwm ~p ~p", [Topic, Id]),
                       vg_topics:insert_hwm(Topic, Partition, Id - 1)
               end, Topics),
+    lager:info("starting supervisor", []),
     vonnegut_sup:start_link().
 
 
