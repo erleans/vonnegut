@@ -2,6 +2,7 @@
 -module(vg_log_segments).
 
 -export([init_table/0,
+         load_existing/2,
          load_all/2,
          insert/3,
          local/2,
@@ -24,6 +25,15 @@
 init_table() ->
     ets:new(?SEGMENTS_TABLE, [bag, public, named_table, {read_concurrency, true}]).
 
+load_existing(Topic, Partition) ->
+    TopicDir = vg_utils:topic_dir(Topic, Partition),
+    case filelib:wildcard(filename:join(TopicDir, "*.log")) of
+        [] ->
+            throw({topic_not_found, Topic, Partition});
+        LogSegments ->
+            load_segments(TopicDir, Topic, Partition, LogSegments)
+    end.
+
 load_all(Topic, Partition) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     case filelib:wildcard(filename:join(TopicDir, "*.log")) of
@@ -31,13 +41,16 @@ load_all(Topic, Partition) ->
             insert(Topic, Partition, 0),
             vg_topics:insert_hwm(Topic, Partition, 0);
         LogSegments ->
-            [begin
-                 SegmentId = list_to_integer(filename:basename(LogSegment, ".log")),
-                 insert(Topic, Partition, SegmentId)
-             end || LogSegment <- LogSegments],
-            {HWM, _, _} = find_latest_id(TopicDir, Topic, Partition),
-            vg_topics:insert_hwm(Topic, Partition, HWM)
+            load_segments(TopicDir, Topic, Partition, LogSegments)
     end.
+
+load_segments(TopicDir, Topic, Partition, LogSegments) ->
+    [begin
+         SegmentId = list_to_integer(filename:basename(LogSegment, ".log")),
+         insert(Topic, Partition, SegmentId)
+     end || LogSegment <- LogSegments],
+    {HWM, _, _} = find_latest_id(TopicDir, Topic, Partition),
+    vg_topics:insert_hwm(Topic, Partition, HWM - 1).
 
 insert(Topic, Partition, SegmentId) ->
     prometheus_gauge:inc(log_segments, [Topic]),
