@@ -10,7 +10,10 @@
          find_segment_offset/3,
          find_record_offset/4,
          new_index_log_files/2,
-         find_latest_id/3]).
+         find_latest_id/3,
+
+         %% for testing
+         last_in_index/3]).
 
 -include("vg.hrl").
 
@@ -167,7 +170,7 @@ new_index_log_files(TopicDir, Id) ->
 
 
 last_in_index(TopicDir, IndexFilename, SegmentId) ->
-    case vg_utils:open_read(IndexFilename) of
+    case file:open(IndexFilename, [read, binary]) of
         {error, enoent} when SegmentId =:= 0 ->
             %% Index file doesn't exist, if this is the first segment (0)
             %% we can just create the files assuming this is a topic creation.
@@ -179,7 +182,7 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
             {0, 0};
         {ok, Index} ->
             try
-                case file:pread(Index, {eof, 6}, 6) of
+                case file:pread(Index, {eof, -6}, 6) of
                     {ok, <<Offset:24/signed, Position:24/signed>>} ->
                         {Offset, Position};
                     _ ->
