@@ -20,12 +20,15 @@ start(_StartType, _StartArgs) ->
     init_tables(),
     Topics = vg_utils:topics_on_disk(),
     Partition = 0,
-    lists:map(fun({Topic, _}) ->
-                      TopicDir = vg_utils:topic_dir(Topic, Partition),
-                      {Id, _, _} = vg_log_segments:find_latest_id(TopicDir, Topic, Partition),
-                      lager:info("inserting hwm ~p ~p", [Topic, Id]),
-                      vg_topics:insert_hwm(Topic, Partition, Id - 1)
-              end, Topics),
+    Start = erlang:monotonic_time(),
+    ec_plists:foreach(fun({Topic, _}) ->
+                              TopicDir = vg_utils:topic_dir(Topic, Partition),
+                              {Id, _, _} = vg_log_segments:find_latest_id(TopicDir, Topic, Partition),
+                              lager:info("inserting hwm ~p ~p", [Topic, Id]),
+                              vg_topics:insert_hwm(Topic, Partition, Id - 1)
+                      end, Topics, [{processes, 10}]),
+    End = erlang:monotonic_time(),
+    lager:info("loading hwm took ~p ms", [erlang:convert_time_unit(End - Start, native, millisecond)]),
     lager:info("starting supervisor", []),
     vonnegut_sup:start_link().
 
