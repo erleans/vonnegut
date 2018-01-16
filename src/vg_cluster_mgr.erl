@@ -171,10 +171,6 @@ ensure_all_topics(ChainName, State) ->
     Topics = vg_utils:topics_on_disk(),
     lists:foldl(fun({Topic, _}, StateAcc=#state{topics=TopicsAcc,
                                                 epoch=Epoch}) ->
-                        Partition = 0,
-                        TopicDir = vg_utils:topic_dir(Topic, Partition),
-                        {Id, _, _} = vg_log_segments:find_latest_id(TopicDir, Topic, Partition),
-                        vg_topics:insert_hwm(Topic, Partition, Id - 1),
                         TopicsAcc1 = maps:put(Topic, ChainName, TopicsAcc),
                         StateAcc#state{topics=TopicsAcc1,
                                        epoch=Epoch+1}
