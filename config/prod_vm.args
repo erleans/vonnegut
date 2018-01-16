@@ -1,4 +1,4 @@
--name vonnegut-${CHAIN_NAME}@${NODE}
+-name vonnegut@${NODE}
 
 -setcookie ${COOKIE}
 
