@@ -7,7 +7,7 @@
 all() ->
     [creation, write_empty, write, index_bug, limit, index_limit,
      startup_index_correctness, many, verify_lazy_load,
-     local_client_test].
+     local_client_test, last_in_index].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -115,6 +115,22 @@ index_bug(Config) ->
 
     ?assertEqual(199, HWM4),
     ?assertEqual(190, length(Reply4)).
+
+last_in_index(Config) ->
+    Topic = ?config(topic, Config),
+
+    [{ok, _}  = vg_client:produce(Topic,
+                                  lists:duplicate(100, <<"123456789abcdef">>))
+     || _ <- lists:seq(1, 100)],
+
+    %% try to force flush
+    application:stop(vonnegut),
+
+    {ok, TopicDir0} = application:get_env(vonnegut, log_dirs),
+    TopicDir = TopicDir0 ++ "/" ++  binary_to_list(Topic) ++ "-0/",
+    Filename = vg_utils:index_file(TopicDir, 0),
+    ct:pal("topic dir ~p, filename ~p", [TopicDir, Filename]),
+    ?assertNotEqual({0, 0}, vg_log_segments:last_in_index(TopicDir, Filename, 1)).
 
 
 limit(Config) ->
