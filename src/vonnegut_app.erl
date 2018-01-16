@@ -24,7 +24,6 @@ start(_StartType, _StartArgs) ->
     ec_plists:foreach(fun({Topic, _}) ->
                               TopicDir = vg_utils:topic_dir(Topic, Partition),
                               {Id, _, _} = vg_log_segments:find_latest_id(TopicDir, Topic, Partition),
-                              lager:info("inserting hwm ~p ~p", [Topic, Id]),
                               vg_topics:insert_hwm(Topic, Partition, Id - 1)
                       end, Topics, [{processes, 10}]),
     End = erlang:monotonic_time(),
