@@ -42,7 +42,11 @@ jobs:
       - checkout
 
       - run:
-          command: gcloud container builds submit --config cloudbuild.yaml . --substitutions _VERSION=$(git describe --abbrev=4 HEAD)
+          command: |
+            echo $GCLOUD_SERVICE_KEY | base64 -d > gcloud-service-key.json
+            gcloud auth activate-service-account --key-file gcloud-service-key.json
+            gcloud config set project $GCLOUD_PROJECT
+            gcloud container builds submit --config cloudbuild.yaml . --substitutions _VERSION=$(git describe --abbrev=4 HEAD)
 
   dialyzer:
     <<: *defaults
@@ -120,6 +124,7 @@ workflows:
           filters:
             branches:
               only:
+                - test-gcloud
                 - master
             tags:
               only: /^v.*/
