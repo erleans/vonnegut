@@ -36,6 +36,14 @@ jobs:
           paths:
             - /root/.cache/rebar3/hex/default/packages
 
+  image:
+    <<: *defaults
+    steps:
+      - checkout
+
+      - run:
+          command: gcloud container builds submit --config cloudbuild.yaml . --substitutions _VERSION=$(git describe --abbrev=4 HEAD)
+
   dialyzer:
     <<: *defaults
     steps:
@@ -60,6 +68,7 @@ jobs:
           key: erlang-plt-20.0.1
           paths:
             - /root/.cache/rebar3/rebar3_20.0.1_plt
+
   xref:
     <<: *defaults
     steps:
@@ -106,6 +115,14 @@ workflows:
   version: 2
   build_and_test:
     jobs:
+      # always send off an image build request when master or a tag
+      - image:
+          filters:
+            branches:
+              only:
+                - master
+            tags:
+              only: /^v.*/
       - build
       - dialyzer:
           requires:
