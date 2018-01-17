@@ -20,7 +20,7 @@
                  index_interval_bytes :: integer()}).
 
 -record(state, {topic_dir   :: file:filename(),
-                id          :: integer(),
+                next_id     :: integer(),
                 next_brick  :: atom(),
                 byte_count  :: integer(),
                 pos         :: integer(),
@@ -87,6 +87,8 @@ init([Topic, Partition, NextNode]) ->
     TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
     filelib:ensure_dir(filename:join(TopicDir, "ensure")),
 
+    vg_log_segments:load_all(Topic, Partition),
+
     {Id, LatestIndex, LatestLog} = vg_log_segments:find_latest_id(TopicDir, Topic, Partition),
     LastLogId = filename:basename(LatestLog, ".log"),
     {ok, LogFD} = vg_utils:open_append(LatestLog),
@@ -95,9 +97,9 @@ init([Topic, Partition, NextNode]) ->
     {ok, Position} = file:position(LogFD, eof),
     {ok, IndexPosition} = file:position(IndexFD, eof),
 
-    vg_topics:update_hwm(Topic, Partition, Id - 1),
+    vg_topics:insert_hwm(Topic, Partition, Id),
 
-    {ok, #state{id = Id,
+    {ok, #state{next_id = Id + 1,
                 next_brick = NextNode,
                 topic_dir = TopicDir,
                 byte_count = 0,
@@ -111,9 +113,8 @@ init([Topic, Partition, NextNode]) ->
                 config = Config
                }}.
 
-handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{id = ID,
+handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{next_id = ID,
                                                                    topic = Topic,
-                                                                   partition = Partition,
                                                                    next_brick = NextBrick}) ->
     %% TODO: add pipelining of requests
     try
@@ -161,9 +162,7 @@ handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{id = ID,
             Go when Go =:= proceed orelse
                     element(1, Go) =:= ok ->
                 State1 = write_record_set(RecordSet, State),
-                LatestId = State1#state.id,
-                vg_topics:update_hwm(Topic, Partition, LatestId - 1),
-                {reply, {ok, LatestId - 1}, State1};
+                {reply, {ok, State1#state.next_id - 1}, State1};
             {write_repair, RepairSet} ->
                 prometheus_counter:inc(write_repairs),
                 %% add in the following when pipelining is added, if it makes sense
@@ -202,8 +201,8 @@ code_change(_, State, _) ->
 
 %%
 
-write_record_set(RecordSet, State) ->
-    lists:foldl(fun(Record, StateAcc=#state{id=Id,
+write_record_set(RecordSet, #state{topic = Topic, partition = Partition} = State) ->
+    lists:foldl(fun(Record, StateAcc=#state{next_id=Id,
                                             byte_count=ByteCount}) ->
                     {NextId, Size, Bytes} = vg_protocol:encode_log(Id, Record),
                     StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
@@ -211,13 +210,14 @@ write_record_set(RecordSet, State) ->
                     StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
                     StateAcc3 = update_index(StateAcc2),
 
-                    StateAcc3#state{id=NextId,
+                    vg_topics:update_hwm(Topic, Partition, Id),
+                    StateAcc3#state{next_id=NextId,
                                     pos=Position1+Size}
                 end, State, RecordSet).
 
 %% Create new log segment and index file if current segment is too large
 %% or if the index file is over its max and would be written to again.
-maybe_roll(Size, State=#state{id=Id,
+maybe_roll(Size, State=#state{next_id=Id,
                               topic_dir=TopicDir,
                               log_fd=LogFile,
                               index_fd=IndexFile,
@@ -256,7 +256,7 @@ update_log(Record, #state{log_fd=LogFile}) ->
     ok = file:write(LogFile, Record).
 
 %% Add to index if the number of bytes written to the log since the last index record was written
-update_index(State=#state{id=Id,
+update_index(State=#state{next_id=Id,
                           pos=Position,
                           index_fd=IndexFile,
                           byte_count=ByteCount,
@@ -271,7 +271,7 @@ update_index(State=#state{id=Id,
 update_index(State) ->
     State.
 
-write_repair(Start, #state{id = ID, topic = Topic, partition = Partition} = _State) ->
+write_repair(Start, #state{next_id = ID, topic = Topic, partition = Partition} = _State) ->
     %% two situations: replaying single-segment writes, and writes
     %% that span multiple segments
     {StartSegmentID, StartPosition} = vg_log_segments:find_segment_offset(Topic, Partition, Start),

@@ -345,19 +345,19 @@ roles_w_reconnect(Config) ->
 
     wait_for_nodes(Nodes1, 50), % wait a max of 5s
     timer:sleep(2000),
-    %% ok = wait_for_start(fun() -> vg_client:produce(<<"bar4">>, 0, 1) end),
+    %% ok = wait_for_start(fun() -> vg_client:produce(<<"bar9">>, 0, 1) end),
 
     ?assertMatch({error, 131}, vg_client:produce(<<"bar4">>, <<"ASDASDASDASDASDASDA">>)),
     %% not sure that I like the inconsistency here
-    ?assertMatch({ok, #{<<"bar4">> := #{0 := #{error_code := 129}}}},
-                 vg_client:fetch(<<"bar4">>, 0, 1)),
+    ?assertMatch({ok, #{<<"bar9">> := #{0 := #{error_code := 129}}}},
+                 vg_client:fetch(<<"bar9">>, 0, 1)),
 
     %% set reconnection on, it's checked dynamically
     application:set_env(vonnegut, swap_restart, true),
 
-    ?assertMatch({ok, 103}, vg_client:produce(<<"bar4">>, <<"ASDASDASDASDASDASDA">>)),
-    ?assertMatch({ok, #{<<"bar4">> := #{0 := #{error_code := 0}}}},
-                  vg_client:fetch(<<"bar4">>, 0, 1)),
+    ?assertMatch({ok, 100}, vg_client:produce(<<"bar9">>, <<"ASDASDASDASDASDASDA">>)),
+    ?assertMatch({ok, #{<<"bar9">> := #{0 := #{error_code := 0}}}},
+                  vg_client:fetch(<<"bar9">>, 0, 1)),
     Config.
 
 concurrent_fetch(_Config) ->
@@ -514,6 +514,7 @@ id_replication(Config) ->
     ?assertMatch({ok, 52}, rpc:call(Tail, gen_server, call, [{via,gproc,{n,l,{<<"bar-n">>, 0}}}, {write, 53, R}, 5000])),
     %% note that we VVVV succeed with 53 even though the previous writes never went through head
     ?assertMatch({ok, 53}, vg_client:produce(Topic, <<"this should succeed on retry">>)),
+    ct:pal("~p", [vg_client:fetch(Topic, 50, 10)]),
     Config.
 
 wait_for_start(Thunk) ->

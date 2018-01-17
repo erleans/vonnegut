@@ -40,7 +40,14 @@ lookup_hwm(Topic, Partition) ->
     catch
         error:badarg ->
             %% maybe just not loaded, try to get from disk first
-            vg_log_segments:load_existing(Topic, Partition)
+            TopicDir = vg_utils:topic_dir(Topic, Partition),
+            try vg_log_segments:find_latest_id(TopicDir, Topic, Partition) of
+                {HWM, _, _} ->
+                    ets:insert(?WATERMARK_TABLE, {{Topic, Partition}, HWM}),
+                    HWM
+            catch error:{badmatch,{error,enoent}} ->
+                    throw({topic_not_found, Topic, Partition})
+            end
     end.
 
 update_hwm(Topic, Partition, HWMUpdate) ->

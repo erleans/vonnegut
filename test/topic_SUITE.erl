@@ -231,29 +231,39 @@ startup_index_correctness(Config) ->
     ct:pal("STARTING TEST"),
 
     {ok, _} = vg_client:produce(Topic,
-                                lists:duplicate(1, <<"123456789abcdef">>)),
+                                lists:duplicate(1, <<"123456789abcdef000000000">>)),
     {ok, _} = vg_client:produce(Topic,
-                                lists:duplicate(1, <<"123456789abcdef">>)),
+                                lists:duplicate(1, <<"123456789abcdef111111111">>)),
 
 
     [begin
          application:stop(vonnegut),
          {ok, _} = application:ensure_all_started(vonnegut),
          wait_for_start(Topic),
-         {ok, _} = vg_client:produce(Topic, <<"123456789abcdef">>),
-         {ok, _} = vg_client:produce(Topic, <<"123456789abcdef">>)
+         A = integer_to_binary(N),
+         B = integer_to_binary(N + 1),
+         C = integer_to_binary(N + 2),
+         M = N + 1,
+         {ok, Q} = vg_client:produce(Topic, [<<"123456789abcdef-", A/binary>>,
+                                             <<"123456789abcdef-", B/binary>>]),
+         ?assertEqual(M, Q),
+         Y = M + 1,
+         {ok, Y} = vg_client:produce(Topic, <<"123456789abcdef-", C/binary>>)
      end
-     || _ <- lists:seq(1, 4)],
+     || N <- lists:seq(2, 11, 3)],
 
     %% -1 Offset returns HWM-Limit to HWM
+    {ok, #{Topic := #{0 := #{record_set := ReplyN}}}} = vg_client:fetch([{Topic, 0, #{limit => 2000}}]),
     {ok, #{Topic := #{0 := #{record_set := Reply0}}}} = vg_client:fetch([{Topic, -1, #{limit => 2}}]),
+    ct:pal("reply 0 ~p", [Reply0]),
+    ct:pal("whole set ~p", [ReplyN]),
     ?assertEqual(2, length(Reply0)),
-    ?assertMatch(#{id := 8}, hd(Reply0)),
-    ?assertMatch(#{id := 9}, hd(lists:reverse(Reply0))),
+    ?assertMatch(#{id := 12}, hd(Reply0)),
+    ?assertMatch(#{id := 13}, hd(lists:reverse(Reply0))),
 
     {ok, #{Topic := #{0 := #{record_set := Reply1}}}} = vg_client:fetch([{Topic, 0, #{limit => 100}}]),
-    ?assertEqual(10, length(Reply1)),
-    ?assertMatch(#{id := 9}, hd(lists:reverse(Reply1))),
+    ?assertEqual(14, length(Reply1)),
+    ?assertMatch(#{id := 13}, hd(lists:reverse(Reply1))),
     ok.
 
 %% verify the active topic segment process is not started until needed
