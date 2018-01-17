@@ -46,7 +46,7 @@ jobs:
             git fetch --tags
             echo $GCLOUD_SERVICE_KEY | base64 -d > gcloud-service-key.json
             gcloud auth activate-service-account --key-file gcloud-service-key.json
-            gcloud container builds submit --config cloudbuild.yaml . --substitutions _VERSION=$(git describe --abbrev=4 HEAD)
+            gcloud container builds submit --config cloudbuild.yaml . --substitutions _VERSION=$(git describe --abbrev=4 HEAD --tags)
 
   dialyzer:
     <<: *defaults
