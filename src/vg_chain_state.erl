@@ -110,9 +110,11 @@ inactive(state_timeout, connect, Data=#data{name=Name,
                     %% monitor next link in the chain
                     NextNode = next_node(Role, node(), Members),
                     case string:split(atom_to_list(NextNode), "@") of
-                        [N, _H] ->
-                            {_, Host, _, Port} = lists:keyfind(list_to_atom(N), 1, AllNodes),
-                            vg_client_pool:start_pool(next_brick, #{ip => Host,
+                        [N, H] ->
+                            [Port] = [P || {N1, H1, _, P} <- AllNodes,
+                                           N1 =:= list_to_atom(N),
+                                           H1 =:= H],
+                            vg_client_pool:start_pool(next_brick, #{ip => H,
                                                                     port => Port});
                         _ ->
                             ok
