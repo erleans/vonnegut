@@ -4,6 +4,10 @@
 -define(MAGIC, 1).
 -define(API_VERSION, 1).
 
+-define(INDEX_ENTRY_SIZE, 8). % bytes
+-define(INDEX_OFFSET_BITS, 32).
+-define(INDEX_POS_BITS, 32).
+
 -define(PRODUCE_REQUEST, 0).
 -define(FETCH_REQUEST, 1).
 -define(METADATA_REQUEST, 3).
