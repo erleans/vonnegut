@@ -14,6 +14,8 @@
          terminate/2,
          code_change/3]).
 
+-include("vg.hrl").
+
 -record(config, {log_dir              :: file:filename(),
                  segment_bytes        :: integer(),
                  index_max_bytes      :: integer(),
@@ -231,10 +233,10 @@ maybe_roll(Size, State=#state{next_id=Id,
                                              index_interval_bytes=IndexIntervalBytes}})
   when Position+Size > SegmentBytes
      orelse (ByteCount+Size >= IndexIntervalBytes
-            andalso IndexPosition+6 > IndexMaxBytes) ->
+            andalso IndexPosition+?INDEX_ENTRY_SIZE > IndexMaxBytes) ->
     lager:debug("seg size ~p max size ~p", [Position+Size, SegmentBytes]),
     lager:debug("index interval size ~p max size ~p", [ByteCount+Size, IndexIntervalBytes]),
-    lager:debug("index pos ~p max size ~p", [IndexPosition+6, IndexMaxBytes]),
+    lager:debug("index pos ~p max size ~p", [IndexPosition+?INDEX_ENTRY_SIZE, IndexMaxBytes]),
     ok = file:sync(LogFile),
     ok = file:sync(IndexFile),
     ok = file:close(LogFile),
@@ -264,9 +266,9 @@ update_index(State=#state{next_id=Id,
                           segment_id=BaseOffset,
                           config=#config{index_interval_bytes=IndexIntervalBytes}})
   when ByteCount >= IndexIntervalBytes ->
-    IndexEntry = <<(Id - BaseOffset):32/unsigned, Position:32/unsigned>>,
+    IndexEntry = <<(Id - BaseOffset):?INDEX_OFFSET_BITS/unsigned, Position:?INDEX_OFFSET_BITS/unsigned>>,
     ok = file:write(IndexFile, IndexEntry),
-    State#state{index_pos=IndexPosition+6,
+    State#state{index_pos=IndexPosition+?INDEX_ENTRY_SIZE,
                 byte_count=0};
 update_index(State) ->
     State.

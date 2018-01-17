@@ -179,7 +179,8 @@ new_index_log_files(TopicDir, Id) ->
     {ok, LogFile} = vg_utils:open_append(LogFilename),
     {IndexFile, LogFile}.
 
-
+%% consider moving this to vg_index, but then we might need to figure
+%% out some other, cleaner way to do the create new case
 last_in_index(TopicDir, IndexFilename, SegmentId) ->
     case file:open(IndexFilename, [read, binary]) of
         {error, enoent} when SegmentId =:= 0 ->
@@ -193,8 +194,8 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
             {-1, 0};
         {ok, Index} ->
             try
-                case file:pread(Index, {eof, -8}, 8) of
-                    {ok, <<Offset:32/signed, Position:32/signed>>} ->
+                case file:pread(Index, {eof, -?INDEX_ENTRY_SIZE}, ?INDEX_ENTRY_SIZE) of
+                    {ok, <<Offset:?INDEX_OFFSET_BITS/signed, Position:?INDEX_POS_BITS/signed>>} ->
                         {Offset, Position};
                     _ ->
                         {-1, 0}
