@@ -31,7 +31,7 @@ load_existing(Topic, Partition) ->
         [] ->
             throw({topic_not_found, Topic, Partition});
         LogSegments ->
-            load_segments(TopicDir, Topic, Partition, LogSegments)
+            load_segments(Topic, Partition, LogSegments)
     end.
 
 load_all(Topic, Partition) ->
@@ -41,16 +41,14 @@ load_all(Topic, Partition) ->
             insert(Topic, Partition, 0),
             vg_topics:insert_hwm(Topic, Partition, 0);
         LogSegments ->
-            load_segments(TopicDir, Topic, Partition, LogSegments)
+            load_segments(Topic, Partition, LogSegments)
     end.
 
-load_segments(TopicDir, Topic, Partition, LogSegments) ->
+load_segments(Topic, Partition, LogSegments) ->
     [begin
          SegmentId = list_to_integer(filename:basename(LogSegment, ".log")),
          insert(Topic, Partition, SegmentId)
-     end || LogSegment <- LogSegments],
-    {HWM, _, _} = find_latest_id(TopicDir, Topic, Partition),
-    vg_topics:insert_hwm(Topic, Partition, HWM - 1).
+     end || LogSegment <- LogSegments].
 
 insert(Topic, Partition, SegmentId) ->
     prometheus_gauge:inc(log_segments, [Topic]),
@@ -192,14 +190,14 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
             {NewIndexFile, NewLogFile} = new_index_log_files(TopicDir, SegmentId),
             file:close(NewIndexFile),
             file:close(NewLogFile),
-            {0, 0};
+            {-1, 0};
         {ok, Index} ->
             try
                 case file:pread(Index, {eof, -6}, 6) of
                     {ok, <<Offset:24/signed, Position:24/signed>>} ->
                         {Offset, Position};
                     _ ->
-                        {0, 0}
+                        {-1, 0}
                 end
             after
                 file:close(Index)
@@ -212,7 +210,7 @@ find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
         {ok, <<_:Size/bytes, Data:12/bytes>>} ->
             find_last_log(Log, NewId, {ok, Data});
         _ ->
-            NewId + 1
+            NewId
     end;
 find_last_log(_Log, Id, _) ->
     Id.
