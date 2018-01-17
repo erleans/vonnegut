@@ -264,7 +264,7 @@ update_index(State=#state{next_id=Id,
                           segment_id=BaseOffset,
                           config=#config{index_interval_bytes=IndexIntervalBytes}})
   when ByteCount >= IndexIntervalBytes ->
-    IndexEntry = <<(Id - BaseOffset):24/signed, Position:24/signed>>,
+    IndexEntry = <<(Id - BaseOffset):32/unsigned, Position:32/unsigned>>,
     ok = file:write(IndexFile, IndexEntry),
     State#state{index_pos=IndexPosition+6,
                 byte_count=0};
