@@ -1,5 +1,5 @@
 %% Index files are named [offset].index
-%% Entries in the index are <<(Id-Offset):24/signed, Position:24/signed>>
+%% Entries in the index are <<(Id-Offset):32/unsigned, Position:32/unsigned>>
 %% Position is the offset in [offset].log to find the log Id
 -module(vg_index).
 
@@ -22,23 +22,23 @@ find_in_index(Fd, BaseOffset, Id) ->
 find_in_index_(_, _, _, <<>>) ->
     0;
 %% special case for when below the first offset in a single entry index
-find_in_index_(_, Id, BaseOffset, <<Offset:24/unsigned, _:24/unsigned>>)
+find_in_index_(_, Id, BaseOffset, <<Offset:32/unsigned, _:32/unsigned>>)
   when BaseOffset + Offset > Id->
     0;
-find_in_index_(_, _, _, <<_:24/unsigned, Position:24/unsigned>>) ->
+find_in_index_(_, _, _, <<_:32/unsigned, Position:32/unsigned>>) ->
     Position;
-find_in_index_(_, Id, BaseOffset, <<Offset:24/unsigned, Position:24/unsigned, _/binary>>)
+find_in_index_(_, Id, BaseOffset, <<Offset:32/unsigned, Position:32/unsigned, _/binary>>)
   when Id =:= BaseOffset + Offset ->
     Position;
 %% special case for below the first offset in a multi-entry index, but
 %% I worry that it might be overly broad.
-find_in_index_(_, Id, BaseOffset, <<Offset:24/unsigned, _:24/unsigned, _:24/unsigned, _:24/unsigned, _/binary>>)
+find_in_index_(_, Id, BaseOffset, <<Offset:32/unsigned, _:32/unsigned, _:32/unsigned, _:32/unsigned, _/binary>>)
   when BaseOffset + Offset > Id ->
     0;
-find_in_index_(_, Id, BaseOffset, <<_:24/unsigned, Position:24/unsigned, Offset:24/unsigned, _:24/unsigned, _/binary>>)
+find_in_index_(_, Id, BaseOffset, <<_:32/unsigned, Position:32/unsigned, Offset:32/unsigned, _:32/unsigned, _/binary>>)
   when BaseOffset + Offset > Id ->
     Position;
-find_in_index_(Fd, Id, BaseOffset, <<_:24/unsigned, _:24/unsigned, Rest/binary>>) ->
+find_in_index_(Fd, Id, BaseOffset, <<_:32/unsigned, _:32/unsigned, Rest/binary>>) ->
     case file:read(Fd, 6) of
         {ok, Bytes} ->
             find_in_index_(Fd, Id, BaseOffset, <<Rest/binary, Bytes/binary>>);

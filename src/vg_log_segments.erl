@@ -193,8 +193,8 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
             {-1, 0};
         {ok, Index} ->
             try
-                case file:pread(Index, {eof, -6}, 6) of
-                    {ok, <<Offset:24/signed, Position:24/signed>>} ->
+                case file:pread(Index, {eof, -8}, 8) of
+                    {ok, <<Offset:32/signed, Position:32/signed>>} ->
                         {Offset, Position};
                     _ ->
                         {-1, 0}
