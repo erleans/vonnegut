@@ -30,7 +30,7 @@ init_per_suite(Config) ->
     {Nodes, RestartInfos} = lists:unzip(Nodes0),
     wait_for_nodes(Nodes, 50), % wait a max of 5s
     timer:sleep(3000),
-    swap_lager(Nodes),
+
     {ok, CoverNodes} = ct_cover:add_nodes(Nodes),
     ct:pal("cover added to ~p", [CoverNodes]),
     [{nodes, Nodes},
@@ -77,7 +77,6 @@ make_args(Inverse, N0) ->
      {erl_flags, ErlFlags}].
 
 
-
 wait_for_nodes(_Nodes, 0) ->
     error(too_slow);
 wait_for_nodes(Nodes, N) ->
@@ -109,36 +108,6 @@ inverse_chain(N) ->
                           ]}},
      {replicas, ?NUM_NODES},
      {port, N}].
-
-start_lager() ->
-    application:load(lager),
-    application:set_env(lager, colored, true),
-    application:set_env(lager, handlers,
-                        [{lager_file_backend,
-                          [{file, "console.log"}, {level, debug}]},
-                         {lager_console_backend,
-                          [{level, info},
-                           {formatter, lager_default_formatter},
-                           {formatter_config,
-                            [time, color, " [",severity,"] ", pid, " ",
-                             module, ":", function, ":", line, ":",
-                             message, "\n"]}]}]),
-    application:ensure_all_started(lager),
-    ok.
-
-swap_lager(Nodes) ->
-    %% for deeper debugging, sometimes it's nice to be able to toggle this off
-    Disable = true,
-    case Disable of
-        true ->
-            ok;
-        _ ->
-            [begin
-                 pong = net_adm:ping(Node),
-                 ok = rpc:call(Node, vonnegut_app, swap_lager, [whereis(lager_event)])
-             end
-             || Node <- Nodes]
-    end.
 
 end_per_suite(Config) ->
     Nodes = ?config(nodes, Config),
@@ -173,7 +142,6 @@ end_per_group(_, _) ->
 init_per_testcase(roles_w_reconnect, Config) ->
     application:load(vonnegut),
     application:start(shackle),
-    start_lager(),
     %% wait for the cluster manager to be up before starting the pools
     case wait_for_mgr() of
         ok ->
@@ -189,8 +157,6 @@ init_per_testcase(roles_w_reconnect, Config) ->
 init_per_testcase(_TestCase, Config) ->
     application:load(vonnegut),
     application:start(shackle),
-    start_lager(),
-    %% swap_lager(?config(nodes, Config)),
     %% wait for the cluster manager to be up before starting the pools
     case wait_for_mgr() of
         ok ->
@@ -230,7 +196,7 @@ groups() ->
        bootstrap,
        healthcheck
       ]},
-     {operations,
+     {log,
       [],
       [
        roles,
@@ -240,14 +206,20 @@ groups() ->
        %% this needs to be at the end, I think, or it might hork the
        %% rest of the tests
        roles_w_reconnect
+      ]},
+     {ops,
+      [],
+      [
+       deactivate_list_topics%,
+       %describe_topic
       ]}
-
     ].
 
 all() ->
     [
      {group, init},
-     {group, operations}
+     {group, log},
+     {group, ops}
     ].
 
 %% test that the cluster is up and can do an end-to-end write/read cycle
@@ -340,12 +312,11 @@ roles_w_reconnect(Config) ->
              Node
          end
          || {Name, {_Args, IArgs}} <- Restarts],
-    swap_lager(Nodes1),
+
     _ = ct_cover:add_nodes(Nodes1),
 
     wait_for_nodes(Nodes1, 50), % wait a max of 5s
     timer:sleep(2000),
-    %% ok = wait_for_start(fun() -> vg_client:produce(<<"bar9">>, 0, 1) end),
 
     ?assertMatch({error, 131}, vg_client:produce(<<"bar4">>, <<"ASDASDASDASDASDASDA">>)),
     %% not sure that I like the inconsistency here
@@ -408,24 +379,9 @@ restart(Config) ->
      end
      || N <- lists:seq(1, 20)],
 
-    %% test whole node restart
-    ct:pal("nodes() ~p", [nodes()]),
-    [begin
-         ?assertMatch({ok, _}, ct_slave:stop(Node))
-     end
-     || Node <- Nodes],
-    ct:pal("nodes() ~p", [nodes()]),
-    timer:sleep(1000),
-    Nodes1 =
-        [begin
-             {ok, Node} = ct_slave:start(Name, Args),
-             Node
-         end
-         || {Name, {Args, _IArgs}} <- Restarts],
-    swap_lager(Nodes1),
-    _ = ct_cover:add_nodes(Nodes1),
+    %% test whole cluster restart
+    Nodes1 = restart_cluster(Config),
 
-    wait_for_nodes(Nodes1, 50), % wait a max of 5s
     timer:sleep(2000),
     ok = wait_for_start(fun() -> vg_client:fetch(<<"bar4">>, 0, 1) end),
 
@@ -446,7 +402,7 @@ restart(Config) ->
     ?assertMatch({error, pool_timeout}, vg_client:produce(<<"bar4">>, <<"this should fail">>)),
     {ok, HeadNode} = ct_slave:start(HeadName, HeadArgs),
     timer:sleep(100),
-    swap_lager([HeadNode]),
+
     _ = ct_cover:add_nodes([HeadNode]),
 
     %% if we start getting off-by-one errors in the hwms below, I
@@ -461,7 +417,7 @@ restart(Config) ->
     ?assertMatch({error, timeout}, vg_client:produce(<<"bar4">>, <<"this should fail too">>)),
     {ok, MiddleNode} = ct_slave:start(MiddleName, MiddleArgs),
     timer:sleep(100),
-    swap_lager([MiddleNode]),
+
     _ = ct_cover:add_nodes([MiddleNode]),
 
     ok = wait_for_start(fun() -> vg_client:produce(<<"bar4">>, <<"this should work eventually too">>) end),
@@ -473,7 +429,7 @@ restart(Config) ->
     ?assertMatch({error, timeout}, vg_client:produce(<<"bar4">>, <<"this should fail">>)),
     {ok, TailNode} = ct_slave:start(TailName, TailArgs),
     timer:sleep(100),
-    swap_lager([TailNode]),
+
     _ = ct_cover:add_nodes([TailNode]),
     ok = wait_for_start(fun() -> vg_client:fetch(<<"bar4">>, 0, 1) end),
     ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 51}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
@@ -511,11 +467,115 @@ id_replication(Config) ->
     {_, _, R2} = vg_protocol:decode_produce_request(R1),
     [{_, R3}] = R2,
     [{_, R}] = R3,
-    ?assertMatch({ok, 52}, rpc:call(Tail, gen_server, call, [{via,gproc,{n,l,{<<"bar-n">>, 0}}}, {write, 53, R}, 5000])),
+    ?assertMatch({ok, 52}, rpc:call(Tail, gen_server, call, [{via,gproc,{n,l,{active, <<"bar-n">>, 0}}}, {write, 53, R}, 5000])),
     %% note that we VVVV succeed with 53 even though the previous writes never went through head
     ?assertMatch({ok, 53}, vg_client:produce(Topic, <<"this should succeed on retry">>)),
     ct:pal("~p", [vg_client:fetch(Topic, 50, 10)]),
     Config.
+
+deactivate_list_topics(Config) ->
+    %% list topics, get the topic from the prior test
+    [Head | _ ] = ?config(nodes, Config),
+
+    InitTopics = rpc:call(Head, vg, running_topics, []),
+    ?assert(length(InitTopics) =< 1),
+
+    %% make a few topics
+    [begin
+         %% make a lot of topics and add a few things to them to delay restart
+         Topic = <<"quux", (integer_to_binary(N))/binary>>,
+         {ok, _} = vg_client:ensure_topic(Topic),
+         vg_client:produce(Topic, [<<"baz", (integer_to_binary(T))/binary>>
+                                       || T <- lists:seq(1, 50)])
+     end
+     || N <- lists:seq(1, 20)],
+
+    %% list them, make sure they're all there
+    Topics = rpc:call(Head, vg, running_topics, []),
+    [begin
+         Topic = <<"quux", (integer_to_binary(N))/binary>>,
+         ?assertEqual(true, lists:member({Topic, 0}, Topics))
+     end
+     || N <- lists:seq(1, 20)],
+
+    %% deactivate a subset
+    [[ok] = rpc:call(Head, vg, deactivate_topic, [<<"quux", (integer_to_binary(N))/binary>>])
+     || N <- lists:seq(1, 10)],
+
+    %% list again, make sure they're shut down
+    Topics2 = rpc:call(Head, vg, running_topics, []),
+    [begin
+         Topic = <<"quux", (integer_to_binary(N))/binary>>,
+         ?assertEqual(true, lists:member({Topic, 0}, Topics2))
+     end
+     || N <- lists:seq(11, 20)],
+    [begin
+         Topic = <<"quux", (integer_to_binary(N))/binary>>,
+         ?assertEqual(false, lists:member({Topic, 0}, Topics2))
+     end
+     || N <- lists:seq(1, 10)],
+
+    %% restart the cluster
+    [Head1 | _ ] = restart_cluster(Config),
+    ct:pal("head1 ~p", [Head1]),
+    timer:sleep(1000),
+
+    %% make sure they're gone
+    ?assertEqual([],
+                 rpc:call(Head1, vg, running_topics, [])),
+
+    %% write to a subset to restart them
+    [begin
+         Topic = <<"quux", (integer_to_binary(N))/binary>>,
+         Foo = vg_client:produce(Topic, <<"blerp">>),
+         ct:pal("foo ~p", [Foo]),
+         ?assertMatch({ok, _}, Foo)
+     end
+     || N <- lists:seq(11, 20)],
+
+    %% list topics to make sure only they are started
+    Topics3 = rpc:call(Head1, vg, running_topics, []),
+    ct:pal("topics3 ~p", [Topics3]),
+    [begin
+         Topic = <<"quux", (integer_to_binary(N))/binary>>,
+         ?assertEqual(true, lists:member({Topic, 0}, Topics3))
+     end
+     || N <- lists:seq(11, 20)],
+    [begin
+         Topic = <<"quux", (integer_to_binary(N))/binary>>,
+         ?assertEqual(false, lists:member({Topic, 0}, Topics3))
+     end
+     || N <- lists:seq(1, 10)],
+
+    %% delete a subset including some that are not active
+    [ok = rpc:call(Head, vg, delete_topic, [<<"quux", (integer_to_binary(N))/binary>>])
+     || N <- lists:seq(5, 14)],
+
+    %% make sure they're not running anymore via list and fetch
+    Topics4 = rpc:call(Head1, vg, running_topics, []),
+    ct:pal("topics3 ~p", [Topics4]),
+    [begin
+         Topic = <<"quux", (integer_to_binary(N))/binary>>,
+         ?assertEqual(true, lists:member({Topic, 0}, Topics4))
+     end
+     || N <- lists:seq(15, 20)],
+    [begin
+         Topic = <<"quux", (integer_to_binary(N))/binary>>,
+         ?assertEqual(false, lists:member({Topic, 0}, Topics4))
+     end
+     || N <- lists:seq(1, 14)],
+
+    ?assertMatch({ok, 50}, vg_client:produce(<<"quux2">>, <<"blerp2">>)),
+    ?assertMatch({ok, 0}, vg_client:produce(<<"quux13">>, <<"blerp2">>)),
+    ?assertMatch({ok, 0} , vg_client:produce(<<"quux6">>, <<"blerp2">>)),
+    ?assertMatch({error,{<<"quux12">>,not_found}}, vg_client:fetch(<<"quux12">>, 10, 1)),
+    ?assertMatch({error,{<<"quux7">>,not_found}}, vg_client:fetch(<<"quux7">>, 10, 2)),
+
+    Config.
+
+%%%%
+%%%%  UTILITIES
+%%%%
 
 wait_for_start(Thunk) ->
     wait_for_start(Thunk, 5000).
@@ -648,3 +708,25 @@ do(M, F, A) ->
 
 nop(Config) ->
     Config.
+
+restart_cluster(Config) ->
+    Nodes = ?config(nodes, Config),
+    Restarts = ?config(restart, Config),
+    ct:pal("nodes() ~p", [nodes()]),
+    [begin
+         ?assertMatch({ok, _}, ct_slave:stop(Node))
+     end
+     || Node <- Nodes],
+    ct:pal("nodes() ~p", [nodes()]),
+    timer:sleep(1000),
+    Nodes1 =
+        [begin
+             {ok, Node} = ct_slave:start(Name, Args),
+             Node
+         end
+         || {Name, {Args, _}} <- Restarts],
+
+    _ = ct_cover:add_nodes(Nodes1),
+
+    wait_for_nodes(Nodes1, 50), % wait a max of 5s
+    Nodes1.

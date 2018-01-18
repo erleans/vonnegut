@@ -25,6 +25,7 @@
 -define(FETCH2_REQUEST, 1001).
 -define(ENSURE_REQUEST, 1002).
 -define(REPLICATE_REQUEST, 1003).
+-define(DELETE_TOPIC_REQUEST, 1004).
 
 -define(UNKNOWN_ERROR, -1).
 -define(NO_ERROR, 0).

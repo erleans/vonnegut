@@ -12,7 +12,9 @@
          start_child/1,
          start_child/2,
          start_child/3,
-         start_child/4]).
+         start_child/4,
+         list_topics/1,
+         stop_child/3]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -60,6 +62,32 @@ start_child(Server0, Topic, Partitions, Retries) ->
             timer:sleep(100),
             start_child(Server0, Topic, Partitions, Retries - 1)
     end.
+
+stop_child(Server, Topic, Partitions) ->
+    %% get a list of topic_sup supervisors
+    Topics = supervisor:which_children({?MODULE, Server}),
+    Topics1 = [{Pid, supervisor:which_children(Pid)}
+               || {_, Pid, _, _} <- Topics],
+    Res =
+        [[case Topic =:= Top andalso lists:member(Part, Partitions) of
+              true ->
+                  supervisor:terminate_child({?MODULE, Server}, Pid);
+              _ ->
+                  ok
+          end
+          || {{active, Top, Part}, _, _, _} <- Children]
+         || {Pid, Children} <- Topics1],
+    lists:usort(lists:flatten(Res)).
+
+list_topics(Server0) ->
+    Server = case Server0 of
+                 local -> ?SERVER;
+                 _ -> {?SERVER, Server0}
+             end,
+    Topics = supervisor:which_children(Server),
+    [{Topic, Partition} || {{active, Topic, Partition}, _, _, _} <-
+               lists:flatten([supervisor:which_children(Pid)
+                              || {_, Pid, _, _} <- Topics])].
 
 %%====================================================================
 %% Supervisor callbacks

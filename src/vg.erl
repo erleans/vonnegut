@@ -1,10 +1,19 @@
 -module(vg).
 
--export([create_topic/1,
-         ensure_topic/1,
+%% client interface
+-export([ensure_topic/1,
          write/3, write/4,
          fetch/1, fetch/2, fetch/4,
          fetch/5]).
+
+%% ops interface.
+-export([
+         create_topic/1,
+         delete_topic/1,
+         describe_topic/1,
+         deactivate_topic/1,
+         running_topics/0
+        ]).
 
 -include("vg.hrl").
 
@@ -110,9 +119,11 @@ fetch(Topic, Partition, Offset, Count) ->
 %% A fetch of offset -1 returns Limit number of the records up to the
 %% high watermark
 fetch(Topic, Partition, -1, MaxBytes, Limit) ->
-    Offset = vg_topics:lookup_hwm(Topic, Partition),
-    fetch(Topic, Partition, erlang:max(0, Offset - Limit + 1), MaxBytes, Limit);
+    HWM = vg_topics:lookup_hwm(Topic, Partition),
+    fetch(Topic, Partition, erlang:max(0, HWM - Limit + 1), MaxBytes, Limit);
 fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
+    %% check high water mark first as it'll thrown for not found
+    HWM = vg_topics:lookup_hwm(Topic, Partition),
     {SegmentId, Position} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
     Fetch =
         case Limit of
@@ -148,12 +159,25 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
             _ -> min(SendBytes, MaxBytes)
         end,
     ErrorCode = 0,
-    case vg_topics:lookup_hwm(Topic, Partition) of
-        {error, not_found} ->
-            {error, not_found};
-        HighWaterMark ->
-            Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HighWaterMark, Bytes),
+    Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HWM, Bytes),
 
-            lager:debug("sending hwm=~p bytes=~p", [HighWaterMark, Bytes]),
-            {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}
-    end.
+    lager:debug("sending hwm=~p bytes=~p", [HWM, Bytes]),
+    {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}.
+
+%% these are here mostly for ergonomics.  right now they just forward
+%% the work to the cluster manager, but we might need to change that
+%% later and this allows us to keep a easy to type interface that
+%% doesn't have to change.
+delete_topic(Topic) ->
+    vg_cluster_mgr:delete_topic(Topic).
+
+describe_topic(Topic) ->
+    vg_cluster_mgr:describe_topic(Topic).
+
+deactivate_topic(Topic) ->
+    vg_cluster_mgr:deactivate_topic(Topic).
+
+%% this is shaping up to be quite expensive and could block lazy
+%% starts of deactivated topics.  use in production with caution.
+running_topics() ->
+    vg_cluster_mgr:running_topics().

@@ -3,6 +3,7 @@
 -export([encode_fetch/4,
          encode_produce/3,
          encode_replicate/6,
+         encode_delete_topic/1,
          encode_request/4,
          encode_metadata_response/2,
          encode_metadata_request/1,
@@ -40,6 +41,9 @@ encode_produce(Acks, Timeout, TopicData) when Acks =:= -1
                                             ; Acks =:= 0
                                             ; Acks =:= 1 ->
     [<<Acks:16/signed-integer, Timeout:32/signed-integer>>, encode_topic_data(TopicData)].
+
+encode_delete_topic(Topic) ->
+    encode_string(Topic).
 
 encode_replicate(Acks, Timeout, Topic, Partition, ExpectedId, Data) when Acks =:= -1
                                                                          ; Acks =:= 0
@@ -306,6 +310,8 @@ decode_response(?PRODUCE_REQUEST, Response) ->
     decode_produce_response(Response);
 decode_response(?REPLICATE_REQUEST, Response) ->
     decode_replicate_response(Response);
+decode_response(?DELETE_TOPIC_REQUEST, Response) ->
+    decode_delete_topic_response(Response);
 decode_response(?TOPICS_REQUEST, Response) ->
     decode_topics_response(Response);
 decode_response(?METADATA_REQUEST, Response) ->
@@ -386,6 +392,13 @@ decode_replicate_response(<<Partition:32/signed-integer, ErrorCode:16/signed-int
     {Partition, #{error_code => ErrorCode, offset => Offset}};
 decode_replicate_response(_) ->
     more.
+
+decode_delete_topic_response(Data) ->
+    case decode_string(Data) of
+        more -> more;
+        {<<"OK">>, <<>>} -> ok;
+        {Reason, <<>>} -> {error, Reason}
+    end.
 
 decode_topics_response(<<TopicsCount:32/signed-integer, Msg/binary>>) ->
     {Chains, _Rest} = decode_array(fun decode_chain/1, Msg),

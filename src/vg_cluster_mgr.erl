@@ -13,8 +13,15 @@
 %% API
 -export([start_link/3,
          get_map/0,
-         create_topic/1,
          ensure_topic/1]).
+
+-export([
+         create_topic/1,
+         delete_topic/1,
+         describe_topic/1,
+         deactivate_topic/1,
+         running_topics/0
+        ]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -59,6 +66,24 @@ create_topic(Topic) ->
 ensure_topic(Topic) ->
     HeadNode = vg_chain_state:head(),
     gen_server:call({?SERVER, HeadNode}, {ensure_topic, Topic}).
+
+delete_topic(Topic) ->
+    HeadNode = vg_chain_state:head(),
+    gen_server:call({?SERVER, HeadNode}, {delete_topic, Topic}, infinity).
+
+describe_topic(Topic) ->
+    HeadNode = vg_chain_state:head(),
+    gen_server:call({?SERVER, HeadNode}, {describe_topic, Topic}).
+
+deactivate_topic(Topic) ->
+    HeadNode = vg_chain_state:head(),
+    gen_server:call({?SERVER, HeadNode}, {deactivate_topic, Topic}).
+
+running_topics() ->
+    HeadNode = vg_chain_state:head(),
+    gen_server:call({?SERVER, HeadNode}, running_topics).
+
+%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([ChainName, ChainNodes, DataDir]) ->
     Chain = create_chain(ChainName, ChainNodes),
@@ -107,7 +132,47 @@ handle_call({ensure_topic, Topic}, _From, State=#state{topics=Topics,
         Chain ->
             start_on_all_nodes(Topic, Chain, Chains),
             {reply, {ok, Chain}, State}
-    end.
+    end;
+handle_call({delete_topic, Topic}, _From, State=#state{topics=Topics,
+                                                       chains=Chains}) ->
+    %% have topic mgr delete the topic segments and directory
+    %% deactivate the topic so that it can be recreated if desired
+    {Reply, Topics1}  =
+        case maps:get(Topic, Topics, not_found) of
+            not_found -> {{error, not_found}, Topics};
+            Chain ->
+                Rep =
+                    try
+                        vg_topic_mgr:delete_topic(Topic, 0)  % eventually iterate partitions?
+                    catch _:{noproc, _} ->
+                            start_on_all_nodes(Topic, Chain, Chains),
+                            vg_topic_mgr:delete_topic(Topic, 0)
+                    end,
+                stop_on_all_nodes(Topic, Chain, Chains),
+                {Rep, maps:remove(Topic, Topics)}
+        end,
+    {reply, Reply, State#state{topics=Topics1}};
+%% handle_call({describe_topic, Topic}, _From, State=#state{topics=Topics,
+%%                                                          chains=Chains}) ->
+%%     %% get the hwm
+%%     %% get number of segments
+%%     %% size on disk
+%%     %% check if it's running?
+%%     {reply, ok, State};
+handle_call({deactivate_topic, Topic}, _From, State=#state{topics=Topics,
+                                                           chains=Chains}) ->
+    Ret =
+        case maps:get(Topic, Topics, not_found) of
+            not_found -> {error, not_found};
+            Chain -> stop_on_all_nodes(Topic, Chain, Chains)
+        end,
+    {reply, Ret, State};
+handle_call(running_topics, _From, State=#state{chains=_Chains}) ->
+    %% TODO: need to do this for all chains?
+    Ret = vg_topics_sup:list_topics(node()),
+    {reply, Ret, State};
+handle_call(_, _, State) ->
+    {noreply, State}.
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -133,6 +198,16 @@ start_on_all_nodes(Topic, Chain, Chains) ->
          {error,{already_started, _}} -> ok;
          {error, Reason} -> exit({error, Reason})
      end || Node <- Nodes].
+
+stop_on_all_nodes(Topic, Chain, Chains) ->
+    #chain{nodes=Nodes} = maps:get(Chain, Chains),
+    %% usort here to remove useless oks
+    lists:usort(
+      [case vg_topics_sup:stop_child(Node, Topic, [0]) of
+           [ok] -> ok;
+           %% annotate and pass on the error for user analysis
+           Other -> {Node, Topic, Other}
+       end || Node <- Nodes]).
 
 %% TODO: the topic space stuff MUST be fixed before multiple chains are supported
 create_chain(Name, []) ->
