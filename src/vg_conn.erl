@@ -263,6 +263,17 @@ handle_request(?REPLICATE_REQUEST, _Role, Data, CorrelationId, Socket) ->
     ReplicateResponse = vg_protocol:encode_replicate_response(Response),
     Size = erlang:iolist_size(ReplicateResponse) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, ReplicateResponse]);
+handle_request(?DELETE_TOPIC_REQUEST, _Role, Data, CorrelationId, Socket) ->
+    {Topic, <<>>} = vg_protocol:decode_string(Data),
+    lager:info("received request to delete topic ~p", [Topic]),
+    Resp = case vg_topic_mgr:delete_topic(Topic, 0) of
+               ok -> <<"OK">>;
+               {error, Reason} ->
+                   io_lib:format("~p", [Reason])
+           end,
+    Response = vg_protocol:encode_string(Resp),
+    Size = erlang:iolist_size(Response) + 4,
+    gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, Response]);
 handle_request(?PRODUCE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
     Results = [{Topic, [begin

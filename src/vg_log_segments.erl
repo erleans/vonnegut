@@ -4,6 +4,8 @@
 -export([init_table/0,
          load_existing/2,
          load_all/2,
+         delete_segments/2,
+         cleanup_segments_table/2,
          insert/3,
          local/2,
          find_log_segment/3,
@@ -49,6 +51,20 @@ load_segments(Topic, Partition, LogSegments) ->
          SegmentId = list_to_integer(filename:basename(LogSegment, ".log")),
          insert(Topic, Partition, SegmentId)
      end || LogSegment <- LogSegments].
+
+delete_segments(Topic, Partition) ->
+    TopicDir = vg_utils:topic_dir(Topic, Partition),
+    AllFiles = filelib:wildcard(filename:join(TopicDir, "*")),
+    ok = lists:foreach(fun file:delete/1, AllFiles),
+    ok = file:del_dir(TopicDir).
+
+cleanup_segments_table(Topic, Partition) ->
+    NumDeleted = ets:select_delete(?SEGMENTS_TABLE,
+                                   [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
+                                     [],
+                                     ?LOG_SEGMENT_RETURN}]),
+    lager:info("deleted ~p segments from the table", [NumDeleted]),
+    prometheus_gauge:dec(log_segments, [NumDeleted]).
 
 insert(Topic, Partition, SegmentId) ->
     prometheus_gauge:inc(log_segments, [Topic]),

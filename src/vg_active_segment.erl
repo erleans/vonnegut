@@ -5,7 +5,8 @@
 
 -export([start_link/3,
          write/3,
-         write/4]).
+         write/4,
+         halt/2]).
 
 -export([init/1,
          handle_call/3,
@@ -21,27 +22,28 @@
                  index_max_bytes      :: integer(),
                  index_interval_bytes :: integer()}).
 
--record(state, {topic_dir   :: file:filename(),
-                next_id     :: integer(),
-                next_brick  :: atom(),
-                byte_count  :: integer(),
-                pos         :: integer(),
-                index_pos   :: integer(),
-                log_fd      :: file:fd(),
-                segment_id  :: integer(),
-                index_fd    :: file:fd(),
-                topic       :: binary(),
-                partition   :: integer(),
-                config      :: #config{}
+-record(state, {topic_dir      :: file:filename(),
+                next_id        :: integer(),
+                next_brick     :: atom(),
+                byte_count     :: integer(),
+                pos            :: integer(),
+                index_pos      :: integer(),
+                log_fd         :: file:fd(),
+                segment_id     :: integer(),
+                index_fd       :: file:fd(),
+                topic          :: binary(),
+                partition      :: integer(),
+                config         :: #config{},
+                halted = false :: boolean()
                }).
 
 %% need this until an Erlang release with `hibernate_after` spec added to gen option type
 -dialyzer({nowarn_function, start_link/3}).
 
--define(SERVER(Topic, Partition), {via, gproc, {n, l, {Topic, Partition}}}).
+-define(ACTIVE_SEG(Topic, Partition), {via, gproc, {n, l, {active, Topic, Partition}}}).
 
 start_link(Topic, Partition, NextBrick) ->
-    case gen_server:start_link(?SERVER(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick],
+    case gen_server:start_link(?ACTIVE_SEG(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick],
                                [{hibernate_after, timer:minutes(5)}]) of % hibernate after 5 minutes with no messages
         {ok, Pid} ->
             {ok, Pid};
@@ -60,10 +62,8 @@ write(Topic, Partition, RecordSet) ->
     write(Topic, Partition, head, RecordSet).
 
 write(Topic, Partition, ExpectedId, RecordSet) ->
-    %% there clearly needs to be a lot more logic here.  it's also not
-    %% clear that this is the right place for this
     try
-        case gen_server:call(?SERVER(Topic, Partition), {write, ExpectedId, RecordSet}) of
+        case gen_server:call(?ACTIVE_SEG(Topic, Partition), {write, ExpectedId, RecordSet}) of
             retry ->
                 write(Topic, Partition, ExpectedId, RecordSet);
             R -> R
@@ -80,6 +80,11 @@ create_retry(Topic, Partition, ExpectedId, RecordSet)->
     lager:warning("write to nonexistent topic '~s', creating", [Topic]),
     {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
     write(Topic, Partition, ExpectedId, RecordSet).
+
+halt(Topic, Partition) ->
+    gen_server:call(?ACTIVE_SEG(Topic, Partition), halt).
+
+%%%%%%%%%%%%
 
 init([Topic, Partition, NextNode]) ->
     lager:info("at=init topic=~p next_server=~p", [Topic, NextNode]),
@@ -115,6 +120,11 @@ init([Topic, Partition, NextNode]) ->
                 config = Config
                }}.
 
+%% coverall to keep any new writes from coming in while we delete the topic
+handle_call(_Msg, _From, State = #state{halted = true}) ->
+    {reply, halted, State};
+handle_call(halt, _From, State) ->
+    {reply, ok, State#state{halted = true}};
 handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{next_id = ID,
                                                                    topic = Topic,
                                                                    next_brick = NextBrick}) ->

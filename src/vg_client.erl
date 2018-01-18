@@ -6,7 +6,12 @@
          ensure_topic/1,
          topics/0, topics/2,
          fetch/1, fetch/2, fetch/3,
+
+         %% internal-only stuff
          replicate/5,
+         delete_topic/2,
+         %% end internal
+
          produce/2, produce/3,
          init/0,
          setup/2,
@@ -172,6 +177,13 @@ replicate(Pool, Topic, ExpectedId, Records, Timeout) ->
             {error, Reason}
     end.
 
+delete_topic(Pool, Topic) ->
+    lager:debug("delete_topic pool=~p topic=~p", [Pool, Topic]),
+    case scall(fun() -> shackle:call(Pool, {delete_topic, Topic}, timer:seconds(60)) end) of
+        {ok, ok} -> ok;
+        {error, Reason} -> {error, Reason}
+    end.
+
 -spec produce(Topic, RecordSet)
              -> {ok, integer()} | {error, term()}
                     when Topic :: vg:topic(),
@@ -293,6 +305,15 @@ handle_request({replicate, Topic, Partition, ExpectedId, Data}, #state {
 
     {ok, RequestId, [<<(iolist_size(EncodedRequest)):32/signed-integer>>, EncodedRequest],
      State#state{corids = maps:put(RequestId, ?REPLICATE_REQUEST, CorIds),
+                 request_counter = RequestCounter + 1}};
+handle_request({delete_topic, Topic}, #state{request_counter = RequestCounter,
+                                             corids = CorIds} = State) ->
+    RequestId = request_id(RequestCounter),
+    Request = vg_protocol:encode_delete_topic(Topic),
+    EncodedRequest = vg_protocol:encode_request(?DELETE_TOPIC_REQUEST, RequestId, ?CLIENT_ID, Request),
+
+    {ok, RequestId, [<<(iolist_size(EncodedRequest)):32/signed-integer>>, EncodedRequest],
+     State#state{corids = maps:put(RequestId, ?DELETE_TOPIC_REQUEST, CorIds),
                  request_counter = RequestCounter + 1}};
 handle_request({produce, TopicRecords}, #state {
                  request_counter = RequestCounter,

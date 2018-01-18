@@ -7,7 +7,8 @@
 
          insert_hwm/3,
          lookup_hwm/2,
-         update_hwm/3]).
+         update_hwm/3,
+         delete_hwm/2]).
 
 -include("vg.hrl").
 
@@ -57,3 +58,6 @@ update_hwm(Topic, Partition, HWMUpdate) ->
         error:badarg ->
             throw(hwm_table_not_loaded)
     end.
+
+delete_hwm(Topic, Partition) ->
+    ets:delete(?WATERMARK_TABLE, {Topic, Partition}).
