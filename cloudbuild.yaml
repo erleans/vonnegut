@@ -1,4 +1,5 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'us.gcr.io/nucleus-sti/vonnegut:${_VERSION}', '.']
-images: ['us.gcr.io/nucleus-sti/vonnegut:${_VERSION}']
+  entrypoint: 'sh'
+  args: ['-c', 'docker build -t us.gcr.io/$PROJECT_ID/vonnegut:$$(git describe --abbrev=4 HEAD --tags) .']
+images: ['us.gcr.io/nucleus-sti/vonnegut']
