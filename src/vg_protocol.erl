@@ -395,7 +395,6 @@ decode_replicate_response(_) ->
 
 decode_delete_topic_response(Data) ->
     case decode_string(Data) of
-        more -> more;
         {<<"OK">>, <<>>} -> ok;
         {Reason, <<>>} -> {error, Reason}
     end.
