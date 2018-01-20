@@ -25,6 +25,9 @@
 %%% API
 %%%===================================================================
 
+%% need this until an Erlang release with `hibernate_after` spec added to gen option type
+-dialyzer({nowarn_function, start_link/3}).
+
 -define(TOPIC_MGR(Topic, Partition), {via, gproc, {n, l, {mgr, Topic, Partition}}}).
 
 start_link(Topic, Partition, Next) ->

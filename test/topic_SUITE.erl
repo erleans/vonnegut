@@ -238,6 +238,8 @@ startup_index_correctness(Config) ->
 
     [begin
          application:stop(vonnegut),
+         %% bleh circle
+         timer:sleep(750),
          {ok, _} = application:ensure_all_started(vonnegut),
          wait_for_start(Topic),
          A = integer_to_binary(N),
