@@ -52,4 +52,11 @@ record_set_larger_than_max_segment(_Config) ->
     ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000002.index"])), 16),
     ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000002.log"])), 64),
     ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000004.index"])), 8),
-    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000004.log"])), 86).
+    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000004.log"])), 86),
+
+    %% regression test. check that a cold node (no data loaded) finds the right hwm for a topic
+
+    application:stop(vonnegut),
+    application:ensure_all_started(vonnegut),
+
+    ?assertEqual(4, vg_topics:lookup_hwm(Topic, Partition)).
