@@ -41,7 +41,8 @@ load_all(Topic, Partition) ->
     case filelib:wildcard(filename:join(TopicDir, "*.log")) of
         [] ->
             insert(Topic, Partition, 0),
-            vg_topics:insert_hwm(Topic, Partition, 0);
+            vg_topics:insert_hwm(Topic, Partition, 0),
+            [];
         LogSegments ->
             load_segments(Topic, Partition, LogSegments)
     end.
@@ -49,7 +50,8 @@ load_all(Topic, Partition) ->
 load_segments(Topic, Partition, LogSegments) ->
     [begin
          SegmentId = list_to_integer(filename:basename(LogSegment, ".log")),
-         insert(Topic, Partition, SegmentId)
+         insert(Topic, Partition, SegmentId),
+         SegmentId
      end || LogSegment <- LogSegments].
 
 delete_segments(Topic, Partition) ->
@@ -88,7 +90,14 @@ find_log_segment(Topic, Partition, RecordId) ->
                                        ?LOG_SEGMENT_GUARD(RecordId),
                                        ?LOG_SEGMENT_RETURN}]) of
         [] ->
-            0;
+            %% check disk
+            Segments = load_existing(Topic, Partition),
+            case lists:dropwhile(fun(S) -> RecordId > S end, Segments) of
+                [] ->
+                    0;
+                [SegmentId] ->
+                    SegmentId
+            end;
         Matches  ->
             %% Return largest, being the largest log segment
             %% offset that is still less than the record offset
@@ -103,7 +112,13 @@ find_active_segment(Topic, Partition) ->
                                        [],
                                        ?LOG_SEGMENT_RETURN}]) of
         [] ->
-            0;
+            %% check disk
+            case load_existing(Topic, Partition) of
+                [] ->
+                    0;
+                Segments ->
+                    lists:max(Segments)
+            end;
         Matches  ->
             lists:max(Matches)
     end.
@@ -179,7 +194,7 @@ find_latest_id(TopicDir, Topic, Partition) ->
     try
         file:position(Log, Position),
         NewId = find_last_log(Log, Offset, file:read(Log, 12)),
-        {NewId+SegmentId, IndexFilename, LogSegmentFilename}
+        {NewId, IndexFilename, LogSegmentFilename}
     after
         file:close(Log)
     end.
@@ -212,7 +227,9 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
             try
                 case file:pread(Index, {eof, -?INDEX_ENTRY_SIZE}, ?INDEX_ENTRY_SIZE) of
                     {ok, <<Offset:?INDEX_OFFSET_BITS/signed, Position:?INDEX_POS_BITS/signed>>} ->
-                        {Offset, Position};
+                        %% index stores offsets as offset from SegmentId
+                        %% so add SegmentId here to get the real id
+                        {Offset+SegmentId, Position};
                     _ ->
                         {-1, 0}
                 end
