@@ -7,6 +7,8 @@
          write/3,
          write/4,
          halt/2,
+         tail/3,
+         where/2,
          stop_indexing/2,
          resume_indexing/2]).
 
@@ -37,7 +39,8 @@
                 partition      :: integer(),
                 config         :: #config{},
                 halted = false :: boolean(),
-                index = true   :: boolean()
+                index = true   :: boolean(),
+                tailer         :: pid() | undefined
                }).
 
 %% need this until an Erlang release with `hibernate_after` spec added to gen option type
@@ -87,6 +90,13 @@ create_retry(Topic, Partition, ExpectedId, RecordSet)->
 halt(Topic, Partition) ->
     gen_server:call(?ACTIVE_SEG(Topic, Partition), halt).
 
+tail(Topic, Partition, Printer) ->
+    gen_server:call(?ACTIVE_SEG(Topic, Partition), {tail, Printer}).
+
+where(Topic, Partition) ->
+    {_, _, Where} = ?ACTIVE_SEG(Topic, Partition),
+    gproc:where(Where).
+
 stop_indexing(Topic, Partition) ->
     gen_server:call(?ACTIVE_SEG(Topic, Partition), stop_indexing).
 
@@ -134,6 +144,9 @@ handle_call(_Msg, _From, State = #state{halted = true}) ->
     {reply, halted, State};
 handle_call(halt, _From, State) ->
     {reply, ok, State#state{halted = true}};
+handle_call({tail, Printer}, _From, State) ->
+    monitor(process, Printer),
+    {reply, ok, State#state{tailer = Printer}};
 handle_call(stop_indexing, _From, #state{index_fd = undefined} = State) ->
     {reply, ok, State#state{index = false}};
 handle_call(stop_indexing, _From, #state{index_fd = FD} = State) ->
@@ -143,6 +156,7 @@ handle_call(stop_indexing, _From, #state{index_fd = FD} = State) ->
 handle_call(resume_indexing, _From, State) ->
     {reply, ok, State#state{index = true}};
 handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{next_id = ID,
+                                                                   tailer = Tailer,
                                                                    topic = Topic,
                                                                    next_brick = NextBrick}) ->
     %% TODO: add pipelining of requests
@@ -191,6 +205,12 @@ handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{next_id = ID,
             Go when Go =:= proceed orelse
                     element(1, Go) =:= ok ->
                 State1 = write_record_set(RecordSet, State),
+                case Tailer of
+                    undefined ->
+                        ok;
+                    Pid ->
+                        Pid ! {'$print', {State1#state.next_id - 1, RecordSet}}
+                end,
                 {reply, {ok, State1#state.next_id - 1}, State1};
             {write_repair, RepairSet} ->
                 prometheus_counter:inc(write_repairs),
@@ -219,6 +239,8 @@ handle_cast(_Msg, State) ->
     lager:info("bad cast ~p", [_Msg]),
     {noreply, State}.
 
+handle_info({'DOWN', _MonitorRef, _Type, _Object, _Info}, State) ->
+    {noreply, State#state{tailer = undefined}};
 handle_info(_, State) ->
     {noreply, State}.
 
