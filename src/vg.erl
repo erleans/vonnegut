@@ -13,6 +13,7 @@
          describe_topic/1,
          deactivate_topic/1,
          regenerate_topic_index/1,
+         tail_topic/1, tail_topic/2,
          running_topics/0
         ]).
 
@@ -186,7 +187,41 @@ deactivate_topic(Topic) ->
 regenerate_topic_index(Topic) ->
     vg_topic_mgr:regenerate_index(Topic, 0).
 
+tail_topic(Topic) ->
+    tail_topic(Topic, #{}).
+
+-spec tail_topic(binary(), Opts) -> ok when
+      Opts :: #{records => pos_integer(), % default 10 records
+                time => pos_integer()}.   % default 30 seconds
+tail_topic(Topic, Opts) ->
+    Printer = erlang:spawn_opt(fun() -> tail_printer(Topic, Opts) end,
+                               [{max_heap_size, 1024 * 1024}]),
+    vg_active_segment:tail(Topic, 0, Printer).
+
 %% this is shaping up to be quite expensive and could block lazy
 %% starts of deactivated topics.  use in production with caution.
 running_topics() ->
     vg_cluster_mgr:running_topics().
+
+tail_printer(Topic, Opts) ->
+    Records = maps:get(records, Opts, 10),
+    Time = maps:get(time, Opts, timer:seconds(30)),
+    EndTime = erlang:monotonic_time(milli_seconds) + Time,
+    F = fun Loop(0, _End) ->
+                io:format("printed ~p records, terminating~n", [Records]);
+            Loop(R, End) ->
+                Left = End - erlang:monotonic_time(milli_seconds),
+                case Left > 0 of
+                    true ->
+                        receive
+                            {'$print', Term} ->
+                                io:format("~p: ~p~n", [Topic, Term]),
+                                Loop(R - 1, End)
+                        after Left ->
+                                io:format("tail session timed out~n")
+                        end;
+                    false ->
+                        io:format("tail session timed out~n")
+                end
+        end,
+    F(Records, EndTime).
