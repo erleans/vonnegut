@@ -6,7 +6,9 @@
 -export([start_link/3,
          write/3,
          write/4,
-         halt/2]).
+         halt/2,
+         stop_indexing/2,
+         resume_indexing/2]).
 
 -export([init/1,
          handle_call/3,
@@ -30,11 +32,12 @@
                 index_pos      :: integer(),
                 log_fd         :: file:fd(),
                 segment_id     :: integer(),
-                index_fd       :: file:fd(),
+                index_fd       :: file:fd() | undefined,
                 topic          :: binary(),
                 partition      :: integer(),
                 config         :: #config{},
-                halted = false :: boolean()
+                halted = false :: boolean(),
+                index = true   :: boolean()
                }).
 
 %% need this until an Erlang release with `hibernate_after` spec added to gen option type
@@ -84,6 +87,12 @@ create_retry(Topic, Partition, ExpectedId, RecordSet)->
 halt(Topic, Partition) ->
     gen_server:call(?ACTIVE_SEG(Topic, Partition), halt).
 
+stop_indexing(Topic, Partition) ->
+    gen_server:call(?ACTIVE_SEG(Topic, Partition), stop_indexing).
+
+resume_indexing(Topic, Partition) ->
+    gen_server:call(?ACTIVE_SEG(Topic, Partition), resume_indexing).
+
 %%%%%%%%%%%%
 
 init([Topic, Partition, NextNode]) ->
@@ -125,6 +134,14 @@ handle_call(_Msg, _From, State = #state{halted = true}) ->
     {reply, halted, State};
 handle_call(halt, _From, State) ->
     {reply, ok, State#state{halted = true}};
+handle_call(stop_indexing, _From, #state{index_fd = undefined} = State) ->
+    {reply, ok, State#state{index = false}};
+handle_call(stop_indexing, _From, #state{index_fd = FD} = State) ->
+    %% no need to sync here, we're about to unlink
+    file:close(FD),
+    {reply, ok, State#state{index = false, index_fd = undefined}};
+handle_call(resume_indexing, _From, State) ->
+    {reply, ok, State#state{index = true}};
 handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{next_id = ID,
                                                                    topic = Topic,
                                                                    next_brick = NextBrick}) ->
@@ -236,6 +253,7 @@ maybe_roll(Size, State=#state{next_id=Id,
                               pos=Position,
                               byte_count=ByteCount,
                               index_pos=IndexPosition,
+                              index = Indexing,
                               topic=Topic,
                               partition=Partition,
                               config=#config{segment_bytes=SegmentBytes,
@@ -248,15 +266,26 @@ maybe_roll(Size, State=#state{next_id=Id,
     lager:debug("index interval size ~p max size ~p", [ByteCount+Size, IndexIntervalBytes]),
     lager:debug("index pos ~p max size ~p", [IndexPosition+?INDEX_ENTRY_SIZE, IndexMaxBytes]),
     ok = file:sync(LogFile),
-    ok = file:sync(IndexFile),
     ok = file:close(LogFile),
-    ok = file:close(IndexFile),
+
+    case Indexing of
+        true ->
+            ok = file:sync(IndexFile),
+            ok = file:close(IndexFile);
+        _ ->
+            ok
+    end,
 
     {NewIndexFile, NewLogFile} = vg_log_segments:new_index_log_files(TopicDir, Id),
     vg_log_segments:insert(Topic, Partition, Id),
 
     State#state{log_fd=NewLogFile,
                 index_fd=NewIndexFile,
+                %% we assume here that new indexes are good, and
+                %% re-enable writing, expecting the old indexes to
+                %% catch up eventually.  This might be racy
+                index = true,
+                segment_id = Id,
                 byte_count=0,
                 pos=0,
                 index_pos=0};
@@ -267,6 +296,9 @@ maybe_roll(_, State) ->
 update_log(Record, #state{log_fd=LogFile}) ->
     ok = file:write(LogFile, Record).
 
+%% skip writing indexes if they're disabled.
+update_index(State=#state{index = false}) ->
+    State;
 %% Add to index if the number of bytes written to the log since the last index record was written
 update_index(State=#state{next_id=Id,
                           pos=Position,

@@ -7,8 +7,19 @@
 -include("vg.hrl").
 
 all() ->
-    [record_set_larger_than_max_segment].
+    [record_set_larger_than_max_segment, regenerate_index_test].
 
+init_per_testcase(regenerate_index_test, Config) ->
+    PrivDir = ?config(priv_dir, Config),
+    application:load(vonnegut),
+    application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
+    application:set_env(vonnegut, segment_bytes, 177),
+    application:set_env(vonnegut, index_max_bytes, 50),
+    application:set_env(vonnegut, index_interval_bytes, 24),
+    application:set_env(vonnegut, chain, [{discovery, local}]),
+    application:ensure_all_started(vonnegut),
+    crypto:start(),
+    Config;
 init_per_testcase(_, Config) ->
     PrivDir = ?config(priv_dir, Config),
     application:load(vonnegut),
@@ -60,3 +71,36 @@ record_set_larger_than_max_segment(_Config) ->
     application:ensure_all_started(vonnegut),
 
     ?assertEqual(4, vg_topics:lookup_hwm(Topic, Partition)).
+
+regenerate_index_test(_Config) ->
+    Topic = vg_test_utils:create_random_name(<<"index_regen_test_topic">>),
+    Partition = 0,
+    TopicDir = vg_utils:topic_dir(Topic, Partition),
+    vg:create_topic(Topic),
+
+    vg:write(Topic, 0, [#{record => iolist_to_binary(lists:duplicate(rand:uniform(5), <<"A">>))}
+                        || _ <- lists:seq(1, 50)]),
+
+    AllFiles = filelib:wildcard(filename:join(TopicDir, "*.index")),
+    SHAs = [begin
+                {ok, B} = file:read_file(File),
+                B
+            end
+            || File <- AllFiles],
+
+    vg:regenerate_topic_index(Topic),
+
+    AllFiles1 = filelib:wildcard(filename:join(TopicDir, "*.index")),
+    SHAs1 = [begin
+                 {ok, B} = file:read_file(File),
+                 B
+             end
+             || File <- AllFiles1],
+    ?assertMatch({ok,#{high_water_mark := 49,
+                       partition := 0,
+                       record_set :=
+                           [#{id := 45}]}},
+                 vg:fetch(Topic, 0, 45, 1)),
+
+    ?assertEqual(SHAs, SHAs1),
+    ok.

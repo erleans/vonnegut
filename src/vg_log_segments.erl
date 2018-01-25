@@ -5,6 +5,8 @@
          load_existing/2,
          load_all/2,
          delete_segments/2,
+         delete_indexes/2,
+         regenerate_indexes/2,
          cleanup_segments_table/2,
          insert/3,
          local/2,
@@ -59,6 +61,50 @@ delete_segments(Topic, Partition) ->
     AllFiles = filelib:wildcard(filename:join(TopicDir, "*")),
     ok = lists:foreach(fun file:delete/1, AllFiles),
     ok = file:del_dir(TopicDir).
+
+delete_indexes(Topic, Partition) ->
+    TopicDir = vg_utils:topic_dir(Topic, Partition),
+    AllFiles = filelib:wildcard(filename:join(TopicDir, "*.index")),
+    ok = lists:foreach(fun file:delete/1, AllFiles).
+
+regenerate_indexes(Topic, Partition) ->
+    TopicDir = vg_utils:topic_dir(Topic, Partition),
+    AllFiles = filelib:wildcard(filename:join(TopicDir, "*.log")),
+    ok = lists:foreach(fun regenerate_index/1, AllFiles).
+
+regenerate_index(LogFilename) ->
+    TopicDir = filename:dirname(LogFilename),
+    StrID = filename:basename(LogFilename, ".log"),
+    ID = list_to_integer(StrID),
+    IndexFilename = vg_utils:index_file(TopicDir, ID),
+    {ok, IndexFile} = vg_utils:open_append(IndexFilename),
+    {ok, LogFile} = vg_utils:open_read(LogFilename),
+
+    %% ignore index_max_bytes because it makes no sense without the
+    %% ability to rewrite the segments
+    {ok, IndexInterval} = application:get_env(vonnegut, index_interval_bytes),
+    regen(file:pread(LogFile, 0, 12), 0, LogFile, ID, IndexFile, 99999999, IndexInterval).
+
+regen(eof, _Location, Log, _ID, Index, _Bytes, _IndexInterval) ->
+    file:close(Log),
+    file:close(Index),
+    ok;
+regen({ok, <<Offset:64/signed, Size:32/signed>>}, Location, Log, BaseOffset, Index, Bytes,
+      IndexInterval) ->
+    TotalSize = Size + 12,
+    NextLocation = Location + TotalSize,
+    NewBytes =
+        case Bytes + TotalSize >= IndexInterval of
+            true ->
+                IndexEntry = <<(Offset - BaseOffset):?INDEX_OFFSET_BITS/unsigned,
+                               Location:?INDEX_OFFSET_BITS/unsigned>>,
+                ok = file:write(Index, IndexEntry),
+                0;
+            _ ->
+                Bytes + TotalSize
+        end,
+    regen(file:pread(Log, NextLocation, 12), NextLocation, Log, BaseOffset, Index, NewBytes,
+          IndexInterval).
 
 cleanup_segments_table(Topic, Partition) ->
     NumDeleted = ets:select_delete(?SEGMENTS_TABLE,
@@ -175,7 +221,7 @@ find_in_log(_Log, Id, Position, {ok, <<Id:64/signed, _Size:32/signed>>}) ->
     Position;
 find_in_log(Log, Id, Position, {ok, <<_:64/signed, Size:32/signed>>}) ->
     case file:read(Log, Size + 12) of
-        {ok, <<_:Size/binary, Data:12/binary>>} ->
+        {ok, <<_:Size/binary, Data:12/bytes>>} ->
             find_in_log(Log, Id, Position+Size+12, {ok, Data});
         {ok, <<_:Size/binary>>} ->
             Position+Size+12;
