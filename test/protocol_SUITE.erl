@@ -46,9 +46,9 @@ incomplete_fetch_decode(_Config) ->
     {_, EncodedSet} =
         lists:foldl(
           fun(Rec, {ID, IOL}) ->
-                  {NextID, _Size, Enc} = vg_protocol:encode_log(ID, #{record => Rec}),
-                  %% ct:pal("rec ~p, NextID ~p enc ~p", [Rec, NextID, Enc]),
-                  {NextID, [IOL | Enc]}
+                  #{last_offset_delta := L,
+                    record_batch := RecordBatch} = vg_protocol:encode_record_batch(Rec),
+                  {ID+L+1, [IOL | [<<ID:64/signed-integer, (iolist_size(RecordBatch)):32/signed-integer>>, RecordBatch]]}
           end,
           {55, []}, [<<"bar1">>, <<"bar2">>, <<"bar3">>, <<"bar4">>, <<"bar5">>]),
 
@@ -62,21 +62,21 @@ incomplete_fetch_decode(_Config) ->
     FullResponse = iolist_to_binary(RespIO),
 
     %% make sure that the full request is valid before we start breaking it up
-    ?assertEqual(#{<<"foo">> =>
-                            #{0 =>
-                                  #{error_code => 0,high_water_mark => 99,
-                                    record_set =>
-                                        [#{crc => 2851308080,id => 55,
-                                           record => <<"bar1">>},
-                                         #{crc => 821744522,id => 56,
-                                           record => <<"bar2">>},
-                                         #{crc => 1207821084,id => 57,
-                                           record => <<"bar3">>},
-                                         #{crc => 3650713279,id => 58,
-                                           record => <<"bar4">>},
-                                         #{crc => 2929608233,id => 59,
-                                           record => <<"bar5">>}],
-                                    record_set_size => 150}}},
+    ?assertMatch(#{<<"foo">> :=
+                            #{0 :=
+                                  #{error_code := 0,high_water_mark := 99,
+                                    record_batches :=
+                                        [#{offset := 55,
+                                           value := <<"bar1">>},
+                                         #{offset := 56,
+                                           value := <<"bar2">>},
+                                         #{offset := 57,
+                                           value := <<"bar3">>},
+                                         #{offset := 58,
+                                           value := <<"bar4">>},
+                                         #{offset := 59,
+                                           value := <<"bar5">>}],
+                                    record_batches_size := 355}}},
                  vg_protocol:decode_fetch_response(FullResponse)),
 
     [begin

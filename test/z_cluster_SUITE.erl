@@ -210,8 +210,8 @@ groups() ->
      {ops,
       [],
       [
-       deactivate_list_topics%,
-       %describe_topic
+       deactivate_list_topics%% ,
+       %% describe_topic
       ]}
     ].
 
@@ -230,7 +230,7 @@ bootstrap(Config) ->
     {ok, R} = vg_client:produce(<<"foo">>, <<"bar">>),
     {ok, R1} = vg_client:fetch(<<"foo">>),
     ct:pal("r ~p ~p", [R, R1]),
-    ?assertMatch(#{<<"foo">> := #{0 := #{record_set := [#{record := <<"bar">>}]}}}, R1),
+    ?assertMatch(#{<<"foo">> := #{0 := #{record_batches := [#{value := <<"bar">>}]}}}, R1),
     Config.
 
 healthcheck(Config) ->
@@ -257,7 +257,7 @@ roles(Config) ->
     [vg_client:produce(Topic, <<"bar", (integer_to_binary(N))/binary>>)
      || N <- lists:seq(1, 20)],
     timer:sleep(100),
-    {ok, #{Topic := #{0 := #{record_set := _ }}}} = vg_client:fetch(Topic),
+    {ok, #{Topic := #{0 := #{record_batches := _ }}}} = vg_client:fetch(Topic),
 
     %% try to do a read on the head
     {ok, WritePool} = vg_client_pool:get_pool(Topic, write),
@@ -272,13 +272,15 @@ roles(Config) ->
     ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, R2),
 
     %% try to do a write on the tail
-    {ok, R1} =  shackle:call(ReadPool, {produce, [{Topic, [{0, [<<"bar3000">>, <<"barn_owl">>]}]}]}),
+    #{record_batch := RecordBatch0} = vg_protocol:encode_record_batch([<<"bar3000">>, <<"barn_owl">>]),
+    {ok, R1} =  shackle:call(ReadPool, {produce, [{Topic, [{0, RecordBatch0}]}]}),
     ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, R1),
 
     %% try to do a read and write the middle of the chain
     {ok, Ret} = shackle:call(middle_end, {fetch, [{Topic, [{0, 12, 100}]}]}),
     ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, Ret),
-    {ok, Ret2} =  shackle:call(middle_end, {produce, [{Topic, [{0, [<<"bar3000">>, <<"barn_owl">>]}]}]}),
+    #{record_batch := RecordBatch1} = vg_protocol:encode_record_batch([<<"bar3000">>, <<"barn_owl">>]),
+    {ok, Ret2} =  shackle:call(middle_end, {produce, [{Topic, [{0, RecordBatch1}]}]}),
     ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, Ret2),
 
     shackle_pool:stop(middle_end),
@@ -443,8 +445,8 @@ id_replication(Config) ->
 
     Topic = <<"bar-n">>,
     {ok, _} = vg_client:ensure_topic(Topic),
-    vg_client:produce(Topic, [<<"baz", (integer_to_binary(T))/binary>>
-                                  || T <- lists:seq(1, 50)]),
+    ?assertMatch({ok, 49}, vg_client:produce(Topic, [<<"baz", (integer_to_binary(T))/binary>>
+                                                         || T <- lists:seq(1, 50)])),
 
     ok = wait_for_start(fun() -> vg_client:fetch(Topic, 0, 1) end),
 
@@ -462,12 +464,11 @@ id_replication(Config) ->
     %% retries.  This is complicated by retry detection and multiple
     %% producers, but that should go away once we're on the 1.0
     %% protocol.
-    R0 = vg_protocol:encode_produce(0, 4000, [{Topic, [{0, [<<"asdasd">>, <<"asdasdas">>]}]}]),
+    RB=#{record_batch := RecordBatch} = vg_protocol:encode_record_batch([<<"asdasd">>, <<"asdasdas">>]),
+    R0 = vg_protocol:encode_produce(0, 4000, [{Topic, [{0, RecordBatch}]}]),
     R1 = iolist_to_binary(R0),
-    {_, _, R2} = vg_protocol:decode_produce_request(R1),
-    [{_, R3}] = R2,
-    [{_, R}] = R3,
-    ?assertMatch({ok, 52}, rpc:call(Tail, gen_server, call, [{via,gproc,{n,l,{active, <<"bar-n">>, 0}}}, {write, 53, R}, 5000])),
+    {_, _, _R2} = vg_protocol:decode_produce_request(R1),
+    ?assertMatch({ok, 52}, rpc:call(Tail, gen_server, call, [{via,gproc,{n,l,{active, <<"bar-n">>, 0}}}, {write, 53, RB}, 5000])),
     %% note that we VVVV succeed with 53 even though the previous writes never went through head
     ?assertMatch({ok, 53}, vg_client:produce(Topic, <<"this should succeed on retry">>)),
     ct:pal("~p", [vg_client:fetch(Topic, 50, 10)]),
@@ -636,7 +637,7 @@ concurrent_perf(_Config) ->
                                  end,
                          %%[
                          FetchStart = erlang:monotonic_time(milli_seconds),
-                         {ok, #{record_set := L}} = vg_client:fetch(Topic, 0, 60000),
+                         {ok, #{record_batches := L}} = vg_client:fetch(Topic, 0, 60000),
                          FetchEnd = erlang:monotonic_time(milli_seconds),
                          ?assertEqual(Scale * length(RandomRecords), length(L)),
                          %%?assertEqual(500, length(L)),

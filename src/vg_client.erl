@@ -51,11 +51,11 @@ ensure_topic(Topic) ->
 
 -spec fetch(Topic)
            -> {ok, #{high_water_mark := integer(),
-                     record_set_size := integer(),
+                     record_batches_size := integer(),
                      error_code := integer(),
-                     record_set := RecordSet}}
+                     record_batches := RecordBatches}}
                   when Topic :: vg:topic() | [{vg:topic(), [{integer(), integer(), integer()}]}],
-                       RecordSet :: vg:record_set().
+                       RecordBatches :: [vg:record_batch()].
 
 %% if we don't want to expose the tuple in the second clauses of
 %% fetch/1 and fetch/2, we could do something like fetch_partial,
@@ -134,6 +134,7 @@ do_fetch(Requests, Timeout) ->
                                   {error, Reason}
                           end
                   end, PoolReqs),
+
         lists:foldl(
           fun(_, {error, Response}) ->
                   {error, Response};
@@ -154,21 +155,21 @@ do_fetch(Requests, Timeout) ->
         ocp:finish_span()
     end.
 
--spec replicate(Pool, Topic, ExpectedId, RecordSet, Timeout)
+-spec replicate(Pool, Topic, ExpectedId, RecordBatch, Timeout)
              -> {ok, integer()} | {error, term()} | {write_repair, maps:map()} | retry
                     when Pool :: atom(),
                          Topic :: vg:topic(),
                          ExpectedId :: integer(),
-                         RecordSet :: vg:record_set(),
+                         RecordBatch :: vg:record_batch() | [vg:record_batch()],
                          Timeout :: integer().
-replicate(Pool, Topic, ExpectedId, Records, Timeout) ->
+replicate(Pool, Topic, ExpectedId, RecordBatch, Timeout) ->
     lager:debug("replicate pool=~p topic=~p", [Pool, Topic]),
-    case scall(fun() -> shackle:call(Pool, {replicate, Topic, 0, ExpectedId, Records}, Timeout) end) of
+    case scall(fun() -> shackle:call(Pool, {replicate, Topic, 0, ExpectedId, RecordBatch}, Timeout) end) of
         {ok, {0, #{error_code := 0,
                    offset := Offset}}} ->
             {ok, Offset};
-        {ok, {0, #{error_code := ?WRITE_REPAIR, records := RecordSet}}} ->
-            {write_repair, RecordSet};
+        {ok, {0, #{error_code := ?WRITE_REPAIR, records := RecordBatches}}} ->
+            {write_repair, RecordBatches};
         {ok, {0, #{error_code := ?TIMEOUT_ERROR}}} ->
             retry;
         {ok, {0, #{error_code := ErrorCode}}} ->
@@ -184,25 +185,29 @@ delete_topic(Pool, Topic) ->
         {error, Reason} -> {error, Reason}
     end.
 
--spec produce(Topic, RecordSet)
+-spec produce(Topic, RecordBatch)
              -> {ok, integer()} | {error, term()}
                     when Topic :: vg:topic(),
-                         RecordSet :: vg:record_set().
-produce(Topic, RecordSet) ->
-    produce(Topic, RecordSet, ?TIMEOUT).
+                         RecordBatch :: vg:record_batch() | [vg:record_batch()].
+produce(Topic, RecordBatch) ->
+    produce(Topic, RecordBatch, ?TIMEOUT).
 
--spec produce(Topic, RecordSet, Timeout)
+-spec produce(Topic, RecordBatch, Timeout)
              -> {ok, integer()} | {error, term()}
                     when Topic :: vg:topic(),
-                         RecordSet :: vg:record_set(),
+                         RecordBatch :: vg:record_batch() | [vg:record_batch()],
                          Timeout :: pos_integer().
-produce(Topic, RecordSet, Timeout) ->
+produce(Topic, RecordBatch, Timeout) ->
+    #{record_batch := EncodedRecordBatch} = vg_protocol:encode_record_batch(RecordBatch),
+    produce_(Topic, EncodedRecordBatch, Timeout).
+
+produce_(Topic, EncodedRecordBatch, Timeout) ->
     ocp:start_span(<<"vg_client:produce">>),
     try
         case vg_client_pool:get_pool(Topic, write) of
             {ok, Pool} ->
                 lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
-                TopicRecords = [{Topic, [{0, RecordSet}]}],
+                TopicRecords = [{Topic, [{0, EncodedRecordBatch}]}],
                 Restart = application:get_env(vonnegut, swap_restart, true),
                 case scall(fun() -> shackle:call(Pool, {produce, TopicRecords}, Timeout) end) of
                     {ok, #{Topic := #{0 := #{error_code := 0,
@@ -218,7 +223,7 @@ produce(Topic, RecordSet, Timeout) ->
                       when Restart =:= true ->
                         lager:info("disallowed request error, restarting pools"),
                         vg_client_pool:restart(),
-                        produce(Topic, RecordSet, Timeout);
+                        produce_(Topic, EncodedRecordBatch, Timeout);
                     {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
                         {error, ErrorCode};
                     {error, Reason} ->

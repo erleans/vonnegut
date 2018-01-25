@@ -7,7 +7,7 @@
 -include("vg.hrl").
 
 all() ->
-    [record_set_larger_than_max_segment, regenerate_index_test].
+    [records_larger_than_max_segment, regenerate_index_test].
 
 init_per_testcase(regenerate_index_test, Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -38,32 +38,31 @@ end_per_testcase(_, Config) ->
     application:unload(vonnegut),
     Config.
 
-record_set_larger_than_max_segment(_Config) ->
+records_larger_than_max_segment(_Config) ->
     Topic = vg_test_utils:create_random_name(<<"log_roll_test_topic">>),
     Partition = 0,
     TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
     vg:create_topic(Topic),
     ?assert(filelib:is_dir(TopicPartitionDir)),
 
-    RandomRecords = [#{record => M}
-                      || M <- [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
-                               crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
-                               crypto:strong_rand_bytes(60)]],
-    vg:write(Topic, 0, RandomRecords),
+    [vg:write(Topic, 0, M)
+     || M <- [crypto:strong_rand_bytes(60), crypto:strong_rand_bytes(60),
+              crypto:strong_rand_bytes(6), crypto:strong_rand_bytes(6),
+              crypto:strong_rand_bytes(60)]],
 
     %% Total size of a 60 byte record when written to log becomes 86 bytes
     %% Since index interval is 24 and 86 > 24, 1 index entry of 6 bytes should exist for each as well
-    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000000.index"])), 8),
-    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000000.log"])), 86),
-    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000001.index"])), 8),
-    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000001.log"])), 86),
+    ?assertEqual(8, filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000000.index"]))),
+    ?assertEqual(127, filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000000.log"]))),
+    ?assertEqual(8, filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000001.index"]))),
+    ?assertEqual(127, filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000001.log"]))),
 
     %% Next 2 records create a log with 2 records of 6 bytes each (with headers they are 32 bytes)
     %% with ids 2 and 3. The third record (id 4) then goes in a new index and log
-    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000002.index"])), 16),
-    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000002.log"])), 64),
-    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000004.index"])), 8),
-    ?assertEqual(filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000004.log"])), 86),
+    ?assertEqual(8, filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000002.index"]))),
+    ?assertEqual(73, filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000002.log"]))),
+    ?assertEqual(8, filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000004.index"]))),
+    ?assertEqual(127, filelib:file_size(filename:join([TopicPartitionDir, "00000000000000000004.log"]))),
 
     %% regression test. check that a cold node (no data loaded) finds the right hwm for a topic
 
@@ -78,8 +77,8 @@ regenerate_index_test(_Config) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     vg:create_topic(Topic),
 
-    vg:write(Topic, 0, [#{record => iolist_to_binary(lists:duplicate(rand:uniform(5), <<"A">>))}
-                        || _ <- lists:seq(1, 50)]),
+    [vg:write(Topic, 0, iolist_to_binary(lists:duplicate(rand:uniform(5), <<"A">>)))
+     || _ <- lists:seq(1, 50)],
 
     AllFiles = filelib:wildcard(filename:join(TopicDir, "*.index")),
     SHAs = [begin
@@ -98,8 +97,8 @@ regenerate_index_test(_Config) ->
              || File <- AllFiles1],
     ?assertMatch({ok,#{high_water_mark := 49,
                        partition := 0,
-                       record_set :=
-                           [#{id := 45}]}},
+                       record_batches :=
+                           [#{offset := 45}]}},
                  vg:fetch(Topic, 0, 45, 1)),
 
     ?assertEqual(SHAs, SHAs1),

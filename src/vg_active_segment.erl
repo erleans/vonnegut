@@ -48,6 +48,8 @@
 
 -define(ACTIVE_SEG(Topic, Partition), {via, gproc, {n, l, {active, Topic, Partition}}}).
 
+-define(SIZE_OFFSET_LENGTH, 12).
+
 start_link(Topic, Partition, NextBrick) ->
     case gen_server:start_link(?ACTIVE_SEG(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick],
                                [{hibernate_after, timer:minutes(5)}]) of % hibernate after 5 minutes with no messages
@@ -59,33 +61,38 @@ start_link(Topic, Partition, NextBrick) ->
             {error, Reason}
     end.
 
--spec write(Topic, Partition, RecordSet) -> {ok, Offset} | {error, any()} when
+-spec write(Topic, Partition, RecordBatch) -> {ok, Offset} | {error, any()} when
       Topic :: binary(),
       Partition :: integer(),
-      RecordSet :: vg:record_set(),
+      RecordBatch :: vg:record_batch() | [vg:record_batch()],
       Offset :: integer().
-write(Topic, Partition, RecordSet) ->
-    write(Topic, Partition, head, RecordSet).
+write(Topic, Partition, RecordBatch) ->
+    write(Topic, Partition, head, RecordBatch).
 
-write(Topic, Partition, ExpectedId, RecordSet) ->
+write(Topic, Partition, ExpectedId, [RecordBatch]) ->
+    write_(Topic, Partition, ExpectedId, RecordBatch);
+write(Topic, Partition, ExpectedId, RecordBatch) ->
+    write_(Topic, Partition, ExpectedId, RecordBatch).
+
+write_(Topic, Partition, ExpectedId, RecordBatch) ->
     try
-        case gen_server:call(?ACTIVE_SEG(Topic, Partition), {write, ExpectedId, RecordSet}) of
+        case gen_server:call(?ACTIVE_SEG(Topic, Partition), {write, ExpectedId, RecordBatch}) of
             retry ->
-                write(Topic, Partition, ExpectedId, RecordSet);
+                write_(Topic, Partition, ExpectedId, RecordBatch);
             R -> R
         end
     catch _:{noproc, _} ->
-            create_retry(Topic, Partition, ExpectedId, RecordSet);
+            create_retry(Topic, Partition, ExpectedId, RecordBatch);
           error:badarg ->  %% is this too broad?  how to restrict?
-            create_retry(Topic, Partition, ExpectedId, RecordSet);
+            create_retry(Topic, Partition, ExpectedId, RecordBatch);
           exit:{timeout, _} ->
             {error, timeout}
     end.
 
-create_retry(Topic, Partition, ExpectedId, RecordSet)->
+create_retry(Topic, Partition, ExpectedId, RecordBatch)->
     lager:warning("write to nonexistent topic '~s', creating", [Topic]),
     {ok, _} = vg_cluster_mgr:ensure_topic(Topic),
-    write(Topic, Partition, ExpectedId, RecordSet).
+    write_(Topic, Partition, ExpectedId, RecordBatch).
 
 halt(Topic, Partition) ->
     gen_server:call(?ACTIVE_SEG(Topic, Partition), halt).
@@ -155,25 +162,26 @@ handle_call(stop_indexing, _From, #state{index_fd = FD} = State) ->
     {reply, ok, State#state{index = false, index_fd = undefined}};
 handle_call(resume_indexing, _From, State) ->
     {reply, ok, State#state{index = true}};
-handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{next_id = ID,
-                                                                   tailer = Tailer,
-                                                                   topic = Topic,
-                                                                   next_brick = NextBrick}) ->
+handle_call({write, ExpectedID0, Record=#{last_offset_delta := LastOffsetDelta,
+                                          record_batch := RecordBatch}}, _From, State=#state{next_id=ID,
+                                                                                             tailer=Tailer,
+                                                                                             topic=Topic,
+                                                                                             next_brick=NextBrick}) ->
     %% TODO: add pipelining of requests
     try
         ExpectedID =
             case ExpectedID0 of
                 head ->
-                    ID + length(RecordSet);
+                    ID + LastOffsetDelta + 1;
                 Supplied when is_integer(Supplied) ->
-                    case ID + length(RecordSet) == Supplied of
+                    case (ID + LastOffsetDelta + 1) == Supplied of
                         true ->
                             ExpectedID0;
                         %% should we check > vs < here?  one is repair
                         %% the other is bad corruption
                         _ ->
                             %% inferred current id of the writing segment
-                            WriterID = ExpectedID0 - length(RecordSet),
+                            WriterID = ExpectedID0 - LastOffsetDelta,
                             %% this should probably be limited, if
                             %% we're going back too far, we need to be
                             %% in some sort of catch-up mode
@@ -190,7 +198,7 @@ handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{next_id = ID,
                     (fun Loop(_, Remaining) when Remaining =< 0 ->
                              {error, timeout};
                          Loop(Start, Remaining) ->
-                             case vg_client:replicate(next_brick, Topic, ExpectedID, RecordSet, Remaining) of
+                             case vg_client:replicate(next_brick, Topic, ExpectedID, RecordBatch, Remaining) of
                                  retry ->
                                      Now = erlang:monotonic_time(milli_seconds),
                                      Elapsed = Now - Start,
@@ -204,19 +212,19 @@ handle_call({write, ExpectedID0, RecordSet}, _From, State = #state{next_id = ID,
         case Result of
             Go when Go =:= proceed orelse
                     element(1, Go) =:= ok ->
-                State1 = write_record_set(RecordSet, State),
+                State1 = write_record_batch(Record, State),
                 case Tailer of
                     undefined ->
                         ok;
                     Pid ->
-                        Pid ! {'$print', {State1#state.next_id - 1, RecordSet}}
+                        Pid ! {'$print', {State1#state.next_id - 1, Record}}
                 end,
                 {reply, {ok, State1#state.next_id - 1}, State1};
             {write_repair, RepairSet} ->
                 prometheus_counter:inc(write_repairs),
                 %% add in the following when pipelining is added, if it makes sense
                 %% prometheus_gauge:inc(pending_write_repairs, length(RepairSet)),
-                State1 = write_record_set(RepairSet, State),
+                State1 = write_record_batch(RepairSet, State),
                 case ExpectedID0 of
                     head ->
                         {reply, retry, State1};
@@ -252,19 +260,33 @@ code_change(_, State, _) ->
 
 %%
 
-write_record_set(RecordSet, #state{topic = Topic, partition = Partition} = State) ->
-    lists:foldl(fun(Record, StateAcc=#state{next_id=Id,
-                                            byte_count=ByteCount}) ->
-                    {NextId, Size, Bytes} = vg_protocol:encode_log(Id, Record),
-                    StateAcc1 = #state{pos=Position1} = maybe_roll(Size, StateAcc),
-                    update_log(Bytes, StateAcc1),
-                    StateAcc2 = StateAcc1#state{byte_count=ByteCount+Size},
-                    StateAcc3 = update_index(StateAcc2),
+write_record_batch(Batches, State) when is_list(Batches) ->
+    lists:foldl(fun(Batch, StateAcc) ->
+                        write_record_batch(Batch, StateAcc)
+                end, State, Batches);
+write_record_batch(#{last_offset_delta := LastOffsetDelta,
+                     size := Size0,
+                     record_batch := Bytes}, State=#state{topic=Topic,
+                                                          partition=Partition,
+                                                          next_id=Id,
+                                                          byte_count=ByteCount}) ->
+    Size = Size0 + ?SIZE_OFFSET_LENGTH,
+    NextId = Id + LastOffsetDelta + 1,
+    State1 = #state{pos=Position1,
+                    log_fd=LogFile} = maybe_roll(Size, State),
 
-                    vg_topics:update_hwm(Topic, Partition, Id),
-                    StateAcc3#state{next_id=NextId,
-                                    pos=Position1+Size}
-                end, State, RecordSet).
+    %% write to log
+    ok = file:write(LogFile, [<<Id:64/signed-integer, Size0:32/signed-integer>>, Bytes]),
+    State2 = State1#state{byte_count=ByteCount+Size},
+
+    %% maybe write index entry
+    State3 = update_index(State2),
+
+    %% update highwatermark in ets table
+    vg_topics:update_hwm(Topic, Partition, NextId-1),
+
+    State3#state{next_id=NextId,
+                 pos=Position1+Size}.
 
 %% Create new log segment and index file if current segment is too large
 %% or if the index file is over its max and would be written to again.
@@ -314,10 +336,6 @@ maybe_roll(Size, State=#state{next_id=Id,
 maybe_roll(_, State) ->
     State.
 
-%% Append encoded log to segment
-update_log(Record, #state{log_fd=LogFile}) ->
-    ok = file:write(LogFile, Record).
-
 %% skip writing indexes if they're disabled.
 update_index(State=#state{index = false}) ->
     State;
@@ -340,15 +358,15 @@ update_index(State) ->
 write_repair(Start, #state{next_id = ID, topic = Topic, partition = Partition} = _State) ->
     %% two situations: replaying single-segment writes, and writes
     %% that span multiple segments
-    {StartSegmentID, StartPosition} = vg_log_segments:find_segment_offset(Topic, Partition, Start),
-    {EndSegmentID, EndPosition} = vg_log_segments:find_segment_offset(Topic, Partition, ID),
+    {StartSegmentID, {StartPosition, _}} = vg_log_segments:find_segment_offset(Topic, Partition, Start),
+    {EndSegmentID, {EndPosition, EndSize}} = vg_log_segments:find_segment_offset(Topic, Partition, ID),
     File = vg_utils:log_file(Topic, Partition, StartSegmentID),
     lager:debug("at=write_repair file=~p start=~p end=~p", [File, StartPosition, EndPosition]),
     case StartSegmentID == EndSegmentID of
         true ->
             {ok, FD} = file:open(File, [read, binary, raw]),
             try
-                {ok, Data} = file:pread(FD, StartPosition, EndPosition - StartPosition),
+                {ok, Data} = file:pread(FD, StartPosition, (EndPosition + EndSize) - StartPosition),
                 [{StartSegmentID, Data}]
             after
                 file:close(FD)
