@@ -5,7 +5,8 @@
 %% API
 -export([
          start_link/3,
-         delete_topic/2
+         delete_topic/2,
+         regenerate_index/2
         ]).
 
 %% gen_server callbacks
@@ -43,7 +44,11 @@ start_link(Topic, Partition, Next) ->
 
 delete_topic(Topic, Partition) ->
     %% may need to start the topic if this fails?
-    gen_server:call(?TOPIC_MGR(Topic, Partition), delete_topic, 30000).
+    gen_server:call(?TOPIC_MGR(Topic, Partition), delete_topic, timer:seconds(45)).
+
+regenerate_index(Topic, Partition) ->
+    %% may need to start the topic if this fails?
+    gen_server:call(?TOPIC_MGR(Topic, Partition), regenerate_index, timer:minutes(15)).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -73,6 +78,19 @@ handle_call(delete_topic, _From, #state{topic = Topic, next = Next,
             lager:info("propagating delete"),
             ok = vg_client:delete_topic(next_brick, Topic)
     end,
+    {reply, ok, State};
+%% note that this needs to be done per node, we don't automatically
+%% propagate it
+handle_call(regenerate_index, _From, #state{topic = Topic,
+                                            partition = Partition} = State) ->
+    %% tell active_segment to stop writing indexes
+    ok = vg_active_segment:stop_indexing(Topic, Partition),
+    %% delete all index files
+    ok = vg_log_segments:delete_indexes(Topic, Partition),
+    %% fold over segments and restore indexes
+    ok = vg_log_segments:regenerate_indexes(Topic, Partition),
+    %% tell active_segment to resume writing indexes
+    ok = vg_active_segment:resume_indexing(Topic, Partition),
     {reply, ok, State};
 handle_call(_Request, _From, State) ->
     lager:warning("unexpected call ~p from ~p", [_Request, _From]),

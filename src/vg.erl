@@ -12,6 +12,7 @@
          delete_topic/1,
          describe_topic/1,
          deactivate_topic/1,
+         regenerate_topic_index/1,
          running_topics/0
         ]).
 
@@ -176,6 +177,14 @@ describe_topic(Topic) ->
 
 deactivate_topic(Topic) ->
     vg_cluster_mgr:deactivate_topic(Topic).
+
+%% there's a debate here to be had about doing this all at once vs. a
+%% per segment approach.  wrt to format changes (which should be
+%% ultra-rare), this is the right thing, but wrt index corruption
+%% (which should also be super rare?), we might want the fine control
+%% of regenerating a particular segment's index alone.
+regenerate_topic_index(Topic) ->
+    vg_topic_mgr:regenerate_index(Topic, 0).
 
 %% this is shaping up to be quite expensive and could block lazy
 %% starts of deactivated topics.  use in production with caution.
