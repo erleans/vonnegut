@@ -5,6 +5,8 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+-include("vg.hrl").
+
 -define(NUM_NODES, 3).
 
 suite() ->
@@ -265,23 +267,33 @@ roles(Config) ->
     vg_client_pool:start_pool(middle_end, #{ip => "127.0.0.1", port => 5556,
                                             reconnect => false}),
 
-    {ok, R} = shackle:call(WritePool, {fetch, [{Topic, [{0, 12, 100}]}]}),
-    ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, R),
+    ReplicaId = -1,
+    MaxWaitTime = 5000,
+    MinBytes = 100,
+    Request1 = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{0, 12, 100}]}]),
+    {ok, R} = shackle:call(WritePool, {?FETCH_REQUEST, Request1}),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, vg_protocol:decode_response(?FETCH_REQUEST, R)),
 
-    {ok, R2} = shackle:call(WritePool, {fetch2, [{Topic, [{0, 12, 100, 13}]}]}),
-    ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, R2),
+    Request2 = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{0, 12, 100, 13}]}]),
+    {ok, R2} = shackle:call(WritePool, {?FETCH2_REQUEST, Request2}),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, vg_protocol:decode_response(?FETCH2_REQUEST, R2)),
 
     %% try to do a write on the tail
     #{record_batch := RecordBatch0} = vg_protocol:encode_record_batch([<<"bar3000">>, <<"barn_owl">>]),
-    {ok, R1} =  shackle:call(ReadPool, {produce, [{Topic, [{0, RecordBatch0}]}]}),
-    ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, R1),
+    Acks = 0,
+    Timeout = 5000,
+    Request3 = vg_protocol:encode_produce(Acks, Timeout, [{Topic, [{0, RecordBatch0}]}]),
+    {ok, R1} =  shackle:call(ReadPool, {?PRODUCE_REQUEST, Request3}),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, vg_protocol:decode_response(?PRODUCE_REQUEST, R1)),
 
     %% try to do a read and write the middle of the chain
-    {ok, Ret} = shackle:call(middle_end, {fetch, [{Topic, [{0, 12, 100}]}]}),
-    ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, Ret),
+    Request4 = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, [{Topic, [{0, 12, 100}]}]),
+    {ok, Ret} = shackle:call(middle_end, {?FETCH_REQUEST, Request4}),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 129}}}, vg_protocol:decode_response(?FETCH_REQUEST, Ret)),
     #{record_batch := RecordBatch1} = vg_protocol:encode_record_batch([<<"bar3000">>, <<"barn_owl">>]),
-    {ok, Ret2} =  shackle:call(middle_end, {produce, [{Topic, [{0, RecordBatch1}]}]}),
-    ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, Ret2),
+    Request5 = vg_protocol:encode_produce(Acks, Timeout, [{Topic, [{0, RecordBatch1}]}]),
+    {ok, Ret2} =  shackle:call(middle_end, {?PRODUCE_REQUEST, Request5}),
+    ?assertMatch(#{Topic := #{0 := #{error_code := 131}}}, vg_protocol:decode_response(?PRODUCE_REQUEST, Ret2)),
 
     shackle_pool:stop(middle_end),
     Config.

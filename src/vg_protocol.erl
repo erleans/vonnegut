@@ -344,6 +344,8 @@ decode_response(_) ->
 
 decode_response(?FETCH_REQUEST, Response) ->
     decode_fetch_response(Response);
+decode_response(?FETCH2_REQUEST, Response) ->
+    decode_fetch_response(Response);
 decode_response(?PRODUCE_REQUEST, Response) ->
     decode_produce_response(Response);
 decode_response(?REPLICATE_REQUEST, Response) ->
@@ -353,6 +355,8 @@ decode_response(?DELETE_TOPIC_REQUEST, Response) ->
 decode_response(?TOPICS_REQUEST, Response) ->
     decode_topics_response(Response);
 decode_response(?METADATA_REQUEST, Response) ->
+    decode_metadata_response(Response);
+decode_response(?ENSURE_REQUEST, Response) ->
     decode_metadata_response(Response).
 
 decode_metadata_response(Response) ->

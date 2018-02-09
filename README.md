@@ -93,5 +93,5 @@ $ ulimit -n 63536
 Tests also require a nodename:
 
 ```shell
-$ rebar3 ct --name=testrunner@127.0.0.1
+$ rebar3 ct
 ```

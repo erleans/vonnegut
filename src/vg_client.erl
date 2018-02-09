@@ -23,7 +23,6 @@
 
 -record(state, {
           request_counter = 0    :: non_neg_integer(),
-          corids          = #{}  :: maps:map(),
           buffer          = <<>> :: binary(),
           expected_size   = 0    :: non_neg_integer()
          }).
@@ -38,7 +37,8 @@ metadata() ->
     metadata([]).
 
 metadata(Topics) ->
-    scall(fun() -> shackle:call(metadata, {metadata, Topics}) end).
+    Request = vg_protocol:encode_metadata_request(Topics),
+    scall(metadata, ?METADATA_REQUEST, Request, ?TIMEOUT).
 
 -spec ensure_topic(Topic :: vg:topic()) ->
                           {ok, {Chains :: vg_cluster_mgr:chains_map(),
@@ -46,8 +46,8 @@ metadata(Topics) ->
                           {error, Reason :: term()}.
 ensure_topic(Topic) ->
     %% always use the metadata topic, creation happens inside via a global process.
-    scall(fun() -> shackle:call(metadata, {ensure, [Topic]}, ?TIMEOUT) end).
-
+    Request = vg_protocol:encode_metadata_request([Topic]),
+    scall(metadata, ?ENSURE_REQUEST, Request, ?TIMEOUT).
 
 -spec fetch(Topic)
            -> {ok, #{high_water_mark := integer(),
@@ -104,7 +104,11 @@ do_fetch(Requests, Timeout) ->
                                      {Topic, [{0, Position, MaxBytes, Limit}]}
                                  end
                                  || {Topic, Position, Opts} <- TPO0],
-                          case scall(fun() -> shackle:call(Pool, {fetch2, TPO}, Timeout) end) of
+                          ReplicaId = -1,
+                          MaxWaitTime = 5000,
+                          MinBytes = 100,
+                          Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, TPO),
+                          case scall(Pool, ?FETCH2_REQUEST, Request, Timeout) of
                               %% sometimes because of cloud orchestration, and
                               %% restarts, head and tail nodes will switch or
                               %% move around in time for us to reconnect to them
@@ -164,7 +168,8 @@ do_fetch(Requests, Timeout) ->
                          Timeout :: integer().
 replicate(Pool, Topic, ExpectedId, RecordBatch, Timeout) ->
     lager:debug("replicate pool=~p topic=~p", [Pool, Topic]),
-    case scall(fun() -> shackle:call(Pool, {replicate, Topic, 0, ExpectedId, RecordBatch}, Timeout) end) of
+    Request = vg_protocol:encode_replicate(0, 5000, Topic, 0, ExpectedId, RecordBatch),
+    case scall(Pool, ?REPLICATE_REQUEST, Request, Timeout) of
         {ok, {0, #{error_code := 0,
                    offset := Offset}}} ->
             {ok, Offset};
@@ -180,7 +185,8 @@ replicate(Pool, Topic, ExpectedId, RecordBatch, Timeout) ->
 
 delete_topic(Pool, Topic) ->
     lager:debug("delete_topic pool=~p topic=~p", [Pool, Topic]),
-    case scall(fun() -> shackle:call(Pool, {delete_topic, Topic}, timer:seconds(60)) end) of
+    Request = vg_protocol:encode_delete_topic(Topic),
+    case scall(Pool, ?DELETE_TOPIC_REQUEST, Request, timer:seconds(60)) of
         {ok, ok} -> ok;
         {error, Reason} -> {error, Reason}
     end.
@@ -209,7 +215,8 @@ produce_(Topic, EncodedRecordBatch, Timeout) ->
                 lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
                 TopicRecords = [{Topic, [{0, EncodedRecordBatch}]}],
                 Restart = application:get_env(vonnegut, swap_restart, true),
-                case scall(fun() -> shackle:call(Pool, {produce, TopicRecords}, Timeout) end) of
+                Request = vg_protocol:encode_produce(0, 5000, TopicRecords),
+                case scall(Pool, ?PRODUCE_REQUEST, Request, Timeout) of
                     {ok, #{Topic := #{0 := #{error_code := 0,
                                              offset := Offset}}}} ->
                         {ok, Offset};
@@ -239,10 +246,11 @@ produce_(Topic, EncodedRecordBatch, Timeout) ->
 topics() ->
     topics(metadata, []).
 
-topics(Pool, Topic) ->
+topics(Pool, Topics) ->
     ocp:start_span(<<"vg_client:topics">>),
     try
-        case scall(fun() -> shackle:call(Pool,  {topics, Topic}, ?TIMEOUT) end) of
+        Request = vg_protocol:encode_array([<<(byte_size(T)):16/signed-integer, T/binary>> || T <- Topics]),
+        case scall(Pool, ?TOPICS_REQUEST, Request, ?TIMEOUT) of
             {ok, {_, _}} = OK ->
                 OK;
             {error, Reason} ->
@@ -260,93 +268,12 @@ init() ->
 setup(_Socket, State) ->
     {ok, State}.
 
--spec handle_request(term(), term()) -> {ok, non_neg_integer(), iodata(), term()}.
-handle_request({metadata, Topics}, #state {
-                 request_counter = RequestCounter,
-                 corids = CorIds
-                } = State) ->
-    RequestId = request_id(RequestCounter),
-    Request = vg_protocol:encode_metadata_request(Topics),
-    Data = vg_protocol:encode_request(?METADATA_REQUEST, RequestId, ?CLIENT_ID, Request),
-
-    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
-     State#state{corids = maps:put(RequestId, ?METADATA_REQUEST, CorIds),
-                 request_counter = RequestCounter + 1}};
-handle_request({ensure, Topics}, #state {
-                 request_counter = RequestCounter,
-                 corids = CorIds
-                } = State) ->
-    RequestId = request_id(RequestCounter),
-    Request = vg_protocol:encode_metadata_request(Topics),
-    Data = vg_protocol:encode_request(?ENSURE_REQUEST, RequestId, ?CLIENT_ID, Request),
-
-    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
-     State#state{corids = maps:put(RequestId, ?METADATA_REQUEST, CorIds),
-                 request_counter = RequestCounter + 1}};
-handle_request({Fetch, TopicOffsets}, #state {
-                 request_counter = RequestCounter,
-                 corids = CorIds
-                } = State) when Fetch == fetch orelse Fetch == fetch2 ->
-    RequestId = request_id(RequestCounter),
-    ReplicaId = -1,
-    MaxWaitTime = 5000,
-    MinBytes = 100,
-    ReqType = case Fetch of fetch -> ?FETCH_REQUEST; fetch2 -> ?FETCH2_REQUEST end,
-    Request = vg_protocol:encode_fetch(ReplicaId, MaxWaitTime, MinBytes, TopicOffsets),
-    Data = vg_protocol:encode_request(ReqType, RequestId, ?CLIENT_ID, Request),
-    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
-     State#state{corids = maps:put(RequestId, ?FETCH_REQUEST, CorIds),
-                 request_counter = RequestCounter + 1}};
-handle_request({replicate, Topic, Partition, ExpectedId, Data}, #state {
-                 request_counter = RequestCounter,
-                 corids = CorIds
-                } = State) ->
-
-    RequestId = request_id(RequestCounter),
-    Acks = 0,
-    Timeout = 5000,
-    Request = vg_protocol:encode_replicate(Acks, Timeout, Topic, Partition, ExpectedId, Data),
-    EncodedRequest = vg_protocol:encode_request(?REPLICATE_REQUEST, RequestId, ?CLIENT_ID, Request),
-
-    {ok, RequestId, [<<(iolist_size(EncodedRequest)):32/signed-integer>>, EncodedRequest],
-     State#state{corids = maps:put(RequestId, ?REPLICATE_REQUEST, CorIds),
-                 request_counter = RequestCounter + 1}};
-handle_request({delete_topic, Topic}, #state{request_counter = RequestCounter,
-                                             corids = CorIds} = State) ->
-    RequestId = request_id(RequestCounter),
-    Request = vg_protocol:encode_delete_topic(Topic),
-    EncodedRequest = vg_protocol:encode_request(?DELETE_TOPIC_REQUEST, RequestId, ?CLIENT_ID, Request),
-
-    {ok, RequestId, [<<(iolist_size(EncodedRequest)):32/signed-integer>>, EncodedRequest],
-     State#state{corids = maps:put(RequestId, ?DELETE_TOPIC_REQUEST, CorIds),
-                 request_counter = RequestCounter + 1}};
-handle_request({produce, TopicRecords}, #state {
-                 request_counter = RequestCounter,
-                 corids = CorIds
-                } = State) ->
-
-    RequestId = request_id(RequestCounter),
-    Acks = 0,
-    Timeout = 5000,
-    Request = vg_protocol:encode_produce(Acks, Timeout, TopicRecords),
-    Data = vg_protocol:encode_request(?PRODUCE_REQUEST, RequestId, ?CLIENT_ID, Request),
-
-    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
-     State#state{corids = maps:put(RequestId, ?PRODUCE_REQUEST, CorIds),
-                 request_counter = RequestCounter + 1}};
-handle_request({topics, Topics}, #state {
-                 request_counter = RequestCounter,
-                 corids = CorIds
-                } = State) ->
-
-    RequestId = request_id(RequestCounter),
-    Request = vg_protocol:encode_array([<<(byte_size(T)):16/signed-integer,
-                                          T/binary>> || T <- Topics]),
-    Data = vg_protocol:encode_request(?TOPICS_REQUEST, RequestId, ?CLIENT_ID, Request),
-
-    {ok, RequestId, [<<(iolist_size(Data)):32/signed-integer>>, Data],
-     State#state{corids = maps:put(RequestId, ?TOPICS_REQUEST, CorIds),
-                 request_counter = RequestCounter + 1}}.
+-spec handle_request({integer(), iodata()}, #state{}) -> {ok, non_neg_integer(), iodata(), term()}.
+handle_request({Type, Body}, State=#state{request_counter=RequestCounter}) ->
+    Id = request_id(RequestCounter),
+    Data = vg_protocol:encode_request(Type, Id, ?CLIENT_ID, Body),
+    {ok, Id, [<<(iolist_size(Data)):32/signed-integer>>, Data],
+     State#state{request_counter = RequestCounter + 1}}.
 
 -spec handle_data(binary(), term()) -> {ok, [{term(),term()}], term()}.
 handle_data(Data, State=#state{buffer=Buffer}) ->
@@ -355,23 +282,21 @@ handle_data(Data, State=#state{buffer=Buffer}) ->
 
 decode_data(<<>>, Replies, State) ->
     {ok, Replies, State};
-decode_data(Data, Replies, State=#state{corids=CorIds, expected_size = Exp}) ->
+decode_data(Data, Replies, State=#state{expected_size=Exp}) ->
     case Exp of
         N when N == 0 orelse byte_size(Data) >= N ->
             case vg_protocol:decode_response(Data) of
                 more ->
-                    {ok, Replies, State#state{buffer = Data}};
+                    {ok, Replies, State#state{buffer=Data}};
                 {more, Size} ->
-                    {ok, Replies, State#state{buffer = Data, expected_size = Size}};
+                    {ok, Replies, State#state{buffer=Data, expected_size=Size}};
                 {CorrelationId, Response, Rest} ->
-                    Result = vg_protocol:decode_response(maps:get(CorrelationId, CorIds), Response),
-                    decode_data(Rest, [{CorrelationId, {ok, Result}} | Replies],
-                                State#state{corids = maps:remove(CorrelationId, CorIds),
-                                            expected_size = 0,
+                    decode_data(Rest, [{CorrelationId, {ok, Response}} | Replies],
+                                State#state{expected_size = 0,
                                             buffer = <<>>})
             end;
         _ ->
-            {ok, Replies, State#state{buffer = Data}}
+            {ok, Replies, State#state{buffer=Data}}
     end.
 
 -spec terminate(term()) -> ok.
@@ -382,24 +307,26 @@ terminate(_State) ->
 request_id(RequestCounter) ->
     RequestCounter rem ?MAX_REQUEST_ID.
 
-scall(Thunk) ->
+scall(Pool, RequestType, RequestData, RequestTimeout) ->
     B = backoff:init(2, 200),
     B1 = backoff:type(B, jitter),
     %% at these settings, 25 retries is approximately 5s
-    scall(Thunk, B1, 25).
+    scall(Pool, RequestType, RequestData, RequestTimeout, B1, 25).
 
-scall(_, _, 0) ->
+scall(_, _, _, _, _, 0) ->
     {error, pool_timeout};
-scall(Thunk, B, Retries) ->
-    case Thunk() of
+scall(Pool, RequestType, RequestData, RequestTimeout, Backoff, Retries) ->
+    case shackle:call(Pool,  {RequestType, RequestData}, RequestTimeout) of
         {error, no_socket} ->
-            {Time, B1} = backoff:fail(B),
+            {Time, Backoff1} = backoff:fail(Backoff),
             timer:sleep(Time),
-            scall(Thunk, B1, Retries - 1);
+            scall(Pool, RequestType, RequestData, RequestTimeout, Backoff1, Retries - 1);
         {error, socket_closed} ->
-            {Time, B1} = backoff:fail(B),
+            {Time, Backoff1} = backoff:fail(Backoff),
             timer:sleep(Time),
-            scall(Thunk, B1, Retries - 1);
-        Res ->
-            Res
+            scall(Pool, RequestType, RequestData, RequestTimeout, Backoff1, Retries - 1);
+        {error, timeout} ->
+            {error, timeout};
+        {ok, Response} ->
+            {ok, vg_protocol:decode_response(RequestType, Response)}
     end.
