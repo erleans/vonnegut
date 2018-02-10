@@ -62,7 +62,7 @@ precondition(#state{}, _C = {call, _Mod, _Fun, _Args}) ->
 %% makes sense.
 postcondition(#state{topics = Topics}, {call, vg_client, fetch, [Topic, Index]}, Res) ->
     HWM = maps:get(Topic, Topics, undefined),
-    {ok, #{Topic := #{0 := #{record_set := RecordSet}}}} = Res,
+    {ok, #{Topic := #{0 := #{record_batches := RecordSet}}}} = Res,
     %% potentially validate what we're seeing here, also this will stop being true once more bytes start being returned
     length(RecordSet) =:= (HWM - Index) + 1;
 postcondition(#state{topics = Topics}, {call, vg_client, produce, [Topic, Message]}, Res) ->

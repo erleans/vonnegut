@@ -277,7 +277,7 @@ handle_request(?DELETE_TOPIC_REQUEST, _Role, Data, CorrelationId, Socket) ->
 handle_request(?PRODUCE_REQUEST, Role, Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
     {_Acks, _Timeout, TopicData} = vg_protocol:decode_produce_request(Data),
     Results = [{Topic, [begin
-                            case vg:write(Topic, Partition, MessageSet) of
+                            case vg:write_record_batch(Topic, Partition, MessageSet) of
                                 {ok, Offset} ->
                                     {Partition, ?NO_ERROR, Offset};
                                 {error, socket_closed} ->

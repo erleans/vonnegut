@@ -169,17 +169,17 @@ find_active_segment(Topic, Partition) ->
             lists:max(Matches)
     end.
 
--spec find_segment_offset(Topic, Partition, RecordId) -> {integer(), integer()} when
+-spec find_segment_offset(Topic, Partition, RecordId) -> {integer(), {integer(), integer()}} when
       Topic     :: binary(),
       Partition :: integer(),
       RecordId :: integer().
 find_segment_offset(_Topic, _Partition, 0) ->
-    {0, 0};
+    {0, {0, 0}};
 find_segment_offset(Topic, Partition, RecordId) when RecordId >= 0 ->
     SegmentId = find_log_segment(Topic, Partition, RecordId),
     {SegmentId, find_record_offset(Topic, Partition, SegmentId, RecordId)}.
 
--spec find_record_offset(Topic, Partition, SegmentId, RecordId) -> integer() when
+-spec find_record_offset(Topic, Partition, SegmentId, RecordId) -> {integer(), integer()} when
       Topic     :: binary(),
       Partition :: integer(),
       SegmentId :: integer(),
@@ -205,31 +205,32 @@ find_record_offset(Topic, Partition, SegmentId, RecordId) ->
     end.
 
 %% Find the position in Log file of the start of a log with id Id
--spec find_in_log(Log, Id, Position) -> integer() when
+-spec find_in_log(Log, Id, Position) -> {integer(), integer()} when
       Log      :: file:fd(),
       Id       :: integer(),
       Position :: integer().
 find_in_log(Log, Id, Position) ->
     {ok, _} = file:position(Log, Position),
-    find_in_log(Log, Id, Position, file:read(Log, 12)).
+    find_in_log(Log, Id, Position, 0, file:read(Log, 12)).
 
-find_in_log(Log, Id, _Position, {ok, <<FileId:64/signed, _Size:32/signed>>}) when FileId > Id ->
+find_in_log(_Log, Id, Position, LastSize, {ok, <<FileId:64/signed, _Size:32/signed>>}) when FileId > Id ->
     %% we'll never succeed if this is the case, start scan over.
-    file:position(Log, 0),
-    find_in_log(Log, Id, 0, file:read(Log, 12));
-find_in_log(_Log, Id, Position, {ok, <<Id:64/signed, _Size:32/signed>>}) ->
-    Position;
-find_in_log(Log, Id, Position, {ok, <<_:64/signed, Size:32/signed>>}) ->
+    %% file:position(Log, 0),
+    %% find_in_log(Log, Id, 0, file:read(Log, 12));
+    {Position, LastSize};
+find_in_log(_Log, Id, Position, LastSize, {ok, <<Id:64/signed, _Size:32/signed>>}) ->
+    {Position+LastSize, 0};
+find_in_log(Log, Id, Position, LastSize, {ok, <<_:64/signed, Size:32/signed>>}) ->
     case file:read(Log, Size + 12) of
-        {ok, <<_:Size/binary, Data:12/bytes>>} ->
-            find_in_log(Log, Id, Position+Size+12, {ok, Data});
+        {ok, <<_:Size/binary, Data:12/binary>>} ->
+            find_in_log(Log, Id, Position+LastSize, Size+12, {ok, Data});
         {ok, <<_:Size/binary>>} ->
-            Position+Size+12;
+            {Position+LastSize, Size+12};
         eof ->
-            Position+Size+12
+            {Position+LastSize, Size+12}
     end;
-find_in_log(_, _, _, _) ->
-    0.
+find_in_log(_, _, _, _, _) ->
+    {0, 0}.
 
 find_latest_id(TopicDir, Topic, Partition) ->
     SegmentId = vg_log_segments:find_active_segment(Topic, Partition),
@@ -287,10 +288,13 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
 %% Find the Id for the last log in the log file Log
 find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
     case file:read(Log, Size + 12) of
-        {ok, <<_:Size/bytes, Data:12/bytes>>} ->
-            find_last_log(Log, NewId, {ok, Data});
-        _ ->
-            NewId
+        {ok, <<Batch:Size/bytes, Data:12/bytes>>} ->
+            LastOffsetDelta = vg_protocol:last_offset_delta(Batch),
+            find_last_log(Log, NewId+LastOffsetDelta, {ok, Data});
+        {ok, <<Batch:Size/bytes, _/binary>>} ->
+            LastOffsetDelta = vg_protocol:last_offset_delta(Batch),
+            NewId + LastOffsetDelta
     end;
 find_last_log(_Log, Id, _) ->
     Id.
+

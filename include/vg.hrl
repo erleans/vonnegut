@@ -1,7 +1,7 @@
 -define(CLIENT_ID, "vg_client").
 -define(MAX_REQUEST_ID, 2147483647).
 
--define(MAGIC, 1).
+-define(MAGIC_TWO, 2).
 -define(API_VERSION, 1).
 
 -define(INDEX_ENTRY_SIZE, 8). % bytes

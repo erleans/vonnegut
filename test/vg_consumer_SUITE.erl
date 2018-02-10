@@ -48,16 +48,17 @@ from_zero(_Config) ->
     %% listeners to come up
     timer:sleep(250),
 
+    ?assertMatch({ok, 0},
+                 vg_client:produce(Topic, [#{key => <<"key">>,
+                                             value => <<"record 1 wasn't long enough to make wrapping fail">>}])),
     ?assertMatch({ok, 1},
-                 vg_client:produce(Topic, [{<<"key">>, <<"record 1 wasn't long enough to make wrapping fail">>},
-                                           <<"record 2">>])),
-
-    {ok, #{Topic := #{0 := #{record_set := Data, high_water_mark := HWM}}}} = vg_client:fetch(Topic, 0),
+                 vg_client:produce(Topic, [<<"record 2">>])),
+    {ok, #{Topic := #{0 := #{record_batches := Data, high_water_mark := HWM}}}} = vg_client:fetch(Topic, 0),
     ?assertEqual(1, HWM),
-    ?assertMatch([#{id := 0, record := {<<"key">>, <<"record 1 wasn't long enough to make wrapping fail">>}}], Data),
-    {ok, #{Topic := #{0 := #{record_set := Data1, high_water_mark := HWM1}}}} = vg_client:fetch(Topic, 1),
+    ?assertMatch([#{offset := 0, key := <<"key">>, value := <<"record 1 wasn't long enough to make wrapping fail">>}], Data),
+    {ok, #{Topic := #{0 := #{record_batches := Data1, high_water_mark := HWM1}}}} = vg_client:fetch(Topic, 1),
     ?assertEqual(1, HWM1),
-    ?assertMatch([#{id := 1, record := <<"record 2">>}], Data1),
+    ?assertMatch([#{offset := 1, value := <<"record 2">>}], Data1),
 
     ok.
 
@@ -73,23 +74,27 @@ multi_topic_fetch(_Config) ->
     %% listeners to come up
     timer:sleep(250),
 
+    ?assertMatch({ok, 0},
+                 vg_client:produce(Topic1, [#{timestamp => erlang:system_time(millisecond),
+                                              key => <<"key">>, value => <<"topic 1 record 1">>}])),
     ?assertMatch({ok, 1},
-                 vg_client:produce(Topic1, [{<<"key">>, <<"topic 1 record 1">>},
-                                            <<"topic 1 record 2">>])),
+                 vg_client:produce(Topic1, [<<"topic 1 record 2">>])),
 
+    ?assertMatch({ok, 0},
+                 vg_client:produce(Topic2, [#{timestamp => erlang:system_time(millisecond),
+                                              key => <<"key-2">>, value => <<"topic 2 record 1">>}])),
     ?assertMatch({ok, 1},
-                 vg_client:produce(Topic2, [{<<"key-2">>, <<"topic 2 record 1">>},
-                                            <<"topic 2 record 2">>])),
+                 vg_client:produce(Topic2, [<<"topic 2 record 2">>])),
 
-    {ok, #{Topic1 := #{0 := #{record_set := Data, high_water_mark := HWM}},
-           Topic2 := #{0 := #{record_set := Data2, high_water_mark := HWM2}}}} = vg_client:fetch([{Topic1, 0, #{}},
+    {ok, #{Topic1 := #{0 := #{record_batches := Data, high_water_mark := HWM}},
+           Topic2 := #{0 := #{record_batches := Data2, high_water_mark := HWM2}}}} = vg_client:fetch([{Topic1, 0, #{}},
                                                                                                   {Topic2, 1, #{}}]),
 
     ?assertEqual(1, HWM),
-    ?assertMatch([#{id := 0, record := {<<"key">>, <<"topic 1 record 1">>}}], Data),
+    ?assertMatch([#{offset := 0, key := <<"key">>, value := <<"topic 1 record 1">>}], Data),
 
     ?assertEqual(1, HWM2),
-    ?assertMatch([#{id := 1, record := <<"topic 2 record 2">>}], Data2),
+    ?assertMatch([#{offset := 1, value := <<"topic 2 record 2">>}], Data2),
 
     ok.
 

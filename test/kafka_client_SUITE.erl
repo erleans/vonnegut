@@ -7,7 +7,7 @@
 -include_lib("brod/include/brod.hrl").
 
 all() ->
-    [get_metadata, produce].
+    [get_metadata]. %% produce, add back when brod supports >=0.11.0 kafka
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -67,6 +67,5 @@ produce(Config) ->
 
     ?assertMatch({ok, [#kafka_message{key=Key,
                                       value=M} | _]}, brod:fetch(Hosts, Topic, 0, 0)),
-
 
     ok.
