@@ -2,7 +2,11 @@
 -define(MAX_REQUEST_ID, 2147483647).
 
 -define(MAGIC_TWO, 2).
--define(API_VERSION, 1).
+-define(API_VERSION, 2).
+
+%% a recordbatch starts with FirstOffset:64, Length:32
+%% so 12 is an often used constant when reading batches
+-define(OFFSET_AND_LENGTH_BYTES, 12).
 
 -define(INDEX_ENTRY_SIZE, 8). % bytes
 -define(INDEX_OFFSET_BITS, 32).

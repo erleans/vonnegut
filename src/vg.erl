@@ -110,8 +110,7 @@ fetch(Topic, Offset) ->
     fetch(Topic, 0, Offset, -1).
 
 fetch(Topic, Partition, Offset, Count) ->
-    {_, _, {File, Position, Bytes}} =
-        fetch(Topic, Partition, Offset, 0, Count),
+    {_, _, {File, Position, Bytes}} = fetch(Topic, Partition, Offset, 0, Count),
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
         {ok, [Data]} = file:pread(Fd, [{Position, Bytes}]),
@@ -158,10 +157,9 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
         end,
 
     lager:info("at=fetch_request topic=~s partition=~p offset=~p segment_id=~p position=~p",
-              [Topic, Partition, Offset, SegmentId, Position]),
+               [Topic, Partition, Offset, SegmentId, Position]),
 
     File = vg_utils:log_file(Topic, Partition, SegmentId),
-
     SendBytes =
         case Fetch of
             unlimited ->
@@ -175,9 +173,7 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
             _ -> min(SendBytes, MaxBytes)
         end,
     ErrorCode = 0,
-
     Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HWM, Bytes),
-
     lager:debug("sending hwm=~p bytes=~p", [HWM, Bytes]),
     {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}.
 

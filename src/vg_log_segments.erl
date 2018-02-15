@@ -83,7 +83,7 @@ regenerate_index(LogFilename) ->
     %% ignore index_max_bytes because it makes no sense without the
     %% ability to rewrite the segments
     {ok, IndexInterval} = application:get_env(vonnegut, index_interval_bytes),
-    regen(file:pread(LogFile, 0, 12), 0, LogFile, ID, IndexFile, 99999999, IndexInterval).
+    regen(file:pread(LogFile, 0, ?OFFSET_AND_LENGTH_BYTES), 0, LogFile, ID, IndexFile, 99999999, IndexInterval).
 
 regen(eof, _Location, Log, _ID, Index, _Bytes, _IndexInterval) ->
     file:close(Log),
@@ -91,7 +91,7 @@ regen(eof, _Location, Log, _ID, Index, _Bytes, _IndexInterval) ->
     ok;
 regen({ok, <<Offset:64/signed, Size:32/signed>>}, Location, Log, BaseOffset, Index, Bytes,
       IndexInterval) ->
-    TotalSize = Size + 12,
+    TotalSize = Size + ?OFFSET_AND_LENGTH_BYTES,
     NextLocation = Location + TotalSize,
     NewBytes =
         case Bytes + TotalSize >= IndexInterval of
@@ -103,7 +103,7 @@ regen({ok, <<Offset:64/signed, Size:32/signed>>}, Location, Log, BaseOffset, Ind
             _ ->
                 Bytes + TotalSize
         end,
-    regen(file:pread(Log, NextLocation, 12), NextLocation, Log, BaseOffset, Index, NewBytes,
+    regen(file:pread(Log, NextLocation, ?OFFSET_AND_LENGTH_BYTES), NextLocation, Log, BaseOffset, Index, NewBytes,
           IndexInterval).
 
 cleanup_segments_table(Topic, Partition) ->
@@ -211,26 +211,32 @@ find_record_offset(Topic, Partition, SegmentId, RecordId) ->
       Position :: integer().
 find_in_log(Log, Id, Position) ->
     {ok, _} = file:position(Log, Position),
-    find_in_log(Log, Id, Position, 0, file:read(Log, 12)).
+    find_in_log(Log, Id, Position, 0, file:read(Log, ?OFFSET_AND_LENGTH_BYTES)).
 
 find_in_log(_Log, Id, Position, LastSize, {ok, <<FileId:64/signed, _Size:32/signed>>}) when FileId > Id ->
-    %% we'll never succeed if this is the case, start scan over.
-    %% file:position(Log, 0),
-    %% find_in_log(Log, Id, 0, file:read(Log, 12));
     {Position, LastSize};
 find_in_log(_Log, Id, Position, LastSize, {ok, <<Id:64/signed, _Size:32/signed>>}) ->
     {Position+LastSize, 0};
-find_in_log(Log, Id, Position, LastSize, {ok, <<_:64/signed, Size:32/signed>>}) ->
-    case file:read(Log, Size + 12) of
-        {ok, <<_:Size/binary, Data:12/binary>>} ->
-            find_in_log(Log, Id, Position+LastSize, Size+12, {ok, Data});
-        {ok, <<_:Size/binary>>} ->
-            {Position+LastSize, Size+12};
+find_in_log(Log, Id, Position, LastSize, {ok, <<FileId:64/signed, Size:32/signed>>}) ->
+    case file:read(Log, Size + ?OFFSET_AND_LENGTH_BYTES) of
+        {ok, <<_:Size/binary, Data:?OFFSET_AND_LENGTH_BYTES/binary>>} ->
+            find_in_log(Log, Id, Position+LastSize, Size+?OFFSET_AND_LENGTH_BYTES, {ok, Data});
+        {ok, <<D:Size/binary>>} ->
+            case D of
+                <<_LeaderEpoch:32/signed-integer,
+                  ?MAGIC_TWO:8/signed-integer,
+                  _CRC:32/signed-integer,
+                  _Attributes:16/signed-integer,
+                  LastOffsetDelta:32/signed-integer, _/binary>> when LastOffsetDelta + FileId >= Id ->
+                    {Position+LastSize, Size+?OFFSET_AND_LENGTH_BYTES};
+                _ ->
+                    {Position+LastSize+Size+?OFFSET_AND_LENGTH_BYTES, 0}
+            end;
         eof ->
-            {Position+LastSize, Size+12}
+            {Position+LastSize, Size+?OFFSET_AND_LENGTH_BYTES}
     end;
-find_in_log(_, _, _, _, _) ->
-    {0, 0}.
+find_in_log(_Log, _Id, Position, LastSize, _) ->
+    {Position+LastSize, 0}.
 
 find_latest_id(TopicDir, Topic, Partition) ->
     SegmentId = vg_log_segments:find_active_segment(Topic, Partition),
@@ -240,7 +246,7 @@ find_latest_id(TopicDir, Topic, Partition) ->
     {ok, Log} = vg_utils:open_read(LogSegmentFilename),
     try
         file:position(Log, Position),
-        NewId = find_last_log(Log, Offset, file:read(Log, 12)),
+        NewId = find_last_log(Log, Offset, file:read(Log, ?OFFSET_AND_LENGTH_BYTES)),
         {NewId, IndexFilename, LogSegmentFilename}
     after
         file:close(Log)
@@ -287,8 +293,8 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
 
 %% Find the Id for the last log in the log file Log
 find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
-    case file:read(Log, Size + 12) of
-        {ok, <<Batch:Size/bytes, Data:12/bytes>>} ->
+    case file:read(Log, Size + ?OFFSET_AND_LENGTH_BYTES) of
+        {ok, <<Batch:Size/bytes, Data:?OFFSET_AND_LENGTH_BYTES/bytes>>} ->
             LastOffsetDelta = vg_protocol:last_offset_delta(Batch),
             find_last_log(Log, NewId+LastOffsetDelta, {ok, Data});
         {ok, <<Batch:Size/bytes, _/binary>>} ->

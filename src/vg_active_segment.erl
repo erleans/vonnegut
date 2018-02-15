@@ -48,8 +48,6 @@
 
 -define(ACTIVE_SEG(Topic, Partition), {via, gproc, {n, l, {active, Topic, Partition}}}).
 
--define(SIZE_OFFSET_LENGTH, 12).
-
 start_link(Topic, Partition, NextBrick) ->
     case gen_server:start_link(?ACTIVE_SEG(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick],
                                [{hibernate_after, timer:minutes(5)}]) of % hibernate after 5 minutes with no messages
@@ -270,7 +268,7 @@ write_record_batch(#{last_offset_delta := LastOffsetDelta,
                                                           partition=Partition,
                                                           next_id=Id,
                                                           byte_count=ByteCount}) ->
-    Size = Size0 + ?SIZE_OFFSET_LENGTH,
+    Size = Size0 + ?OFFSET_AND_LENGTH_BYTES,
     NextId = Id + LastOffsetDelta + 1,
     State1 = #state{pos=Position1,
                     log_fd=LogFile} = maybe_roll(Size, State),
