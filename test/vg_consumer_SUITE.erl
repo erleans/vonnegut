@@ -7,7 +7,7 @@
 -include("test_utils.hrl").
 
 all() ->
-    [from_zero, multi_topic_fetch, fetch_unknown].
+    [from_zero, multi_topic_fetch, fetch_unknown, fetch_higher_than_hwm].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -106,5 +106,36 @@ fetch_unknown(_Config) ->
     timer:sleep(250),
 
     ?assertMatch({error, {Topic, not_found}}, vg_client:fetch(Topic, 0)),
+
+    ok.
+
+fetch_higher_than_hwm(_Config) ->
+    Topic = vg_test_utils:create_random_name(<<"consumer_SUITE_fetch_higher_than_hwm">>),
+    {ok, _} = vg_client:ensure_topic(Topic),
+    Partition = 0,
+    TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
+    ?assert(filelib:is_dir(TopicPartitionDir)),
+
+    %% fetch from an empty log
+    {ok, #{Topic := #{0 := #{record_batches := Data0, high_water_mark := HWM0}}}} = vg_client:fetch(Topic, 1),
+    ?assertEqual(-1, HWM0),
+    ?assertMatch([], Data0),
+
+    %% fetch with a limit from an empty log
+    {ok, #{Topic := #{0 := #{record_batches := Data0, high_water_mark := HWM0}}}} = vg_client:fetch(Topic, 1, 1),
+    ?assertEqual(-1, HWM0),
+    ?assertMatch([], Data0),
+
+    %% make sure there's enough time for the
+    %% listeners to come up
+    timer:sleep(250),
+
+    ?assertMatch({ok, 0},
+                 vg_client:produce(Topic, [#{key => <<"some key">>,
+                                             value => <<"rsome value">>}])),
+
+    {ok, #{Topic := #{0 := #{record_batches := Data, high_water_mark := HWM1}}}} = vg_client:fetch(Topic, 1),
+    ?assertEqual(0, HWM1),
+    ?assertMatch([], Data),
 
     ok.
