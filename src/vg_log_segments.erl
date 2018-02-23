@@ -132,18 +132,25 @@ local(Topic, Partition) ->
       RecordId :: integer().
 find_log_segment(Topic, Partition, RecordId) ->
     %% Find all registered log segments for topic-partition < the recordid we are looking for
+    case find_log_segment_(Topic, Partition, RecordId) of
+        [] ->
+            %% load from disk and try again
+            load_existing(Topic, Partition),
+            find_log_segment_(Topic, Partition, RecordId);
+        Match ->
+            %% Return largest, being the largest log segment
+            %% offset that is still less than the record offset
+            Match
+    end.
+
+%% internal version that won't try again if no match found
+find_log_segment_(Topic, Partition, RecordId) ->
+    %% Find all registered log segments for topic-partition < the recordid we are looking for
     case ets:select(?SEGMENTS_TABLE, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
                                        ?LOG_SEGMENT_GUARD(RecordId),
                                        ?LOG_SEGMENT_RETURN}]) of
         [] ->
-            %% check disk
-            Segments = load_existing(Topic, Partition),
-            case lists:dropwhile(fun(S) -> RecordId > S end, Segments) of
-                [] ->
-                    0;
-                [SegmentId] ->
-                    SegmentId
-            end;
+            [];
         Matches  ->
             %% Return largest, being the largest log segment
             %% offset that is still less than the record offset

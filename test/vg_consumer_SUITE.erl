@@ -7,7 +7,7 @@
 -include("test_utils.hrl").
 
 all() ->
-    [from_zero, multi_topic_fetch, fetch_unknown, fetch_higher_than_hwm].
+    [from_zero, multi_topic_fetch, fetch_unknown, fetch_higher_than_hwm, regression_2_23_18].
 
 init_per_suite(Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -133,9 +133,27 @@ fetch_higher_than_hwm(_Config) ->
     ?assertMatch({ok, 0},
                  vg_client:produce(Topic, [#{key => <<"some key">>,
                                              value => <<"rsome value">>}])),
-
     {ok, #{Topic := #{0 := #{record_batches := Data, high_water_mark := HWM1}}}} = vg_client:fetch(Topic, 1),
     ?assertEqual(0, HWM1),
     ?assertMatch([], Data),
+
+    ok.
+
+%% fetch from 5 with limit 1000 was timing out.
+%% issue was vonnegut claiming to send more data than it actually would, leaving the client expecting more
+regression_2_23_18(_Config) ->
+    Topic = vg_test_utils:create_random_name(<<"consumer_SUITE_regression_2-23-18">>),
+    {ok, _} = vg_client:ensure_topic(Topic),
+    Partition = 0,
+    TopicPartitionDir = vg_utils:topic_dir(Topic, Partition),
+    ?assert(filelib:is_dir(TopicPartitionDir)),
+
+    %% make sure there's enough time for the
+    %% listeners to come up
+    timer:sleep(250),
+
+    vg_client:produce(Topic, [#{value => <<"some value">>}]),
+    {ok, #{Topic := #{0 := #{record_batches := _Data, high_water_mark := HWM1}}}} = vg_client:fetch(Topic, 5, 1000),
+    ?assertEqual(0, HWM1),
 
     ok.

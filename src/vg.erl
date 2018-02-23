@@ -133,40 +133,34 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
     %% check high water mark first as it'll thrown for not found
     HWM = vg_topics:lookup_hwm(Topic, Partition),
     {SegmentId, {Position, _}} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
-    Fetch =
+    File = vg_utils:log_file(Topic, Partition, SegmentId),
+    SendBytes =
         case Limit of
             -1 ->
-                unlimited;
+                filelib:file_size(File) - Position;
             _ ->
-                {EndSegmentId, {EndPosition, EndSize}} =
-                    vg_log_segments:find_segment_offset(Topic, Partition, Offset + Limit),
-                case SegmentId of
-                    %% max on this segment, limit fetch
-                    EndSegmentId ->
+                LastOffset = Offset + Limit,
+                case vg_log_segments:find_log_segment(Topic, Partition, LastOffset) of
+                    %% lastoffset is on the same segment, so limit fetch to lastoffset position
+                    SegmentId ->
+                        {EndPosition, EndSize} =
+                            vg_log_segments:find_record_offset(Topic, Partition, SegmentId, LastOffset),
                         case EndPosition of
                             Position ->
                                 %% in the same RecordBatch
-                                {limited, Position + EndSize};
+                                EndSize;
                             _ ->
-                                {limited, (EndPosition + EndSize) - Position}
+                                (EndPosition + EndSize) - Position
                         end;
-                    %% some higher segment, unlimited fetch
+                    %% some higher segment, so send this whole segment
                     _ ->
-                        unlimited
+                        filelib:file_size(File) - Position
                 end
         end,
 
     lager:info("at=fetch_request topic=~s partition=~p offset=~p segment_id=~p position=~p",
                [Topic, Partition, Offset, SegmentId, Position]),
 
-    File = vg_utils:log_file(Topic, Partition, SegmentId),
-    SendBytes =
-        case Fetch of
-            unlimited ->
-                filelib:file_size(File) - Position;
-            {limited, Limited} ->
-                Limited
-        end,
     Bytes =
         case MaxBytes of
             0 -> SendBytes;
