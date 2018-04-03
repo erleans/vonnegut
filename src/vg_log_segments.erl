@@ -197,18 +197,22 @@ find_record_offset(Topic, Partition, SegmentId, RecordId) ->
     IndexSegmentFilename = vg_utils:index_file(TopicDir, SegmentId),
 
     %% Open log and index segment files, advise the OS we'll be reading randomly from them
-    {ok, LogSegmentFD} = vg_utils:open_read(LogSegmentFilename),
-    file:advise(LogSegmentFD, 0, 0, random),
-    {ok, IndexSegmentFD} = vg_utils:open_read(IndexSegmentFilename),
-    file:advise(IndexSegmentFD, 0, 0, random),
+    case vg_utils:open_read(LogSegmentFilename) of
+        {ok, LogSegmentFD} ->
+            file:advise(LogSegmentFD, 0, 0, random),
+            {ok, IndexSegmentFD} = vg_utils:open_read(IndexSegmentFilename),
+            file:advise(IndexSegmentFD, 0, 0, random),
 
-    try
-        InitialOffset = vg_index:find_in_index(IndexSegmentFD, SegmentId, RecordId),
-        lager:info("InitialOffset topic=~p segment_id=~p initial_offset=~p", [Topic, SegmentId, InitialOffset]),
-        find_in_log(LogSegmentFD, RecordId, InitialOffset)
-    after
-        file:close(LogSegmentFD),
-        file:close(IndexSegmentFD)
+            try
+                InitialOffset = vg_index:find_in_index(IndexSegmentFD, SegmentId, RecordId),
+                lager:info("InitialOffset topic=~p segment_id=~p initial_offset=~p", [Topic, SegmentId, InitialOffset]),
+                find_in_log(LogSegmentFD, RecordId, InitialOffset)
+            after
+                file:close(LogSegmentFD),
+                file:close(IndexSegmentFD)
+            end;
+        {error, enoent} ->
+            throw({topic_not_found, Topic, Partition})
     end.
 
 %% Find the position in Log file of the start of a log with id Id
