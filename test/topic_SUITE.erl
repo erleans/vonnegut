@@ -50,12 +50,17 @@ creation(_Config) ->
 write_empty(_Config) ->
     Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
     {ok, _} = vg_client:ensure_topic(Topic),
+
     spawn(fun() -> vg_client:produce(Topic, <<"fleerp">>) end),
-    {ok, #{Topic := #{0 := #{record_batches := Reply}}}} = vg_client:fetch(Topic, 0),
+    {ok, #{Topic := #{0 := #{record_batches := Reply, high_water_mark := HWM}}}} = vg_client:fetch(Topic, 0),
     case Reply of
         [#{value := <<"fleerp">>}] -> % write then read
+            ?assertEqual(0, HWM),
             ok;
-        [] -> % read then write
+        [] ->
+            %% spawned write could have finished after our sendfile data boundaries
+            %% are figured out but before we grabbed the HWM for the response
+            ?assert(-1 =:= HWM orelse 0 =:= HWM),
             ok;
         _ ->
             ct:pal("got ~p", [Reply]),

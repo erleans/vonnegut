@@ -130,8 +130,6 @@ fetch(Topic, Partition, -1, MaxBytes, Limit) ->
     HWM = vg_topics:lookup_hwm(Topic, Partition),
     fetch(Topic, Partition, erlang:max(0, HWM - Limit + 1), MaxBytes, Limit);
 fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
-    %% check high water mark first as it'll thrown for not found
-    HWM = vg_topics:lookup_hwm(Topic, Partition),
     {SegmentId, {Position, _}} = vg_log_segments:find_segment_offset(Topic, Partition, Offset),
     File = vg_utils:log_file(Topic, Partition, SegmentId),
     SendBytes =
@@ -167,6 +165,7 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
             _ -> min(SendBytes, MaxBytes)
         end,
     ErrorCode = 0,
+    HWM = vg_topics:lookup_hwm(Topic, Partition),
     Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HWM, Bytes),
     lager:debug("sending hwm=~p bytes=~p", [HWM, Bytes]),
     {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}.
