@@ -76,7 +76,6 @@ fetch(Topic, Position, Limit) when is_binary(Topic) ->
     do_fetch([{Topic, Position, #{limit => Limit}}], ?TIMEOUT).
 
 do_fetch(Requests, Timeout) ->
-    ocp:start_span(<<"vg_client:fetch">>),
     try
         PoolReqs =
             lists:foldl(
@@ -155,8 +154,6 @@ do_fetch(Requests, Timeout) ->
             lager:info("disallowed request error, restarting pools"),
             vg_client_pool:restart(),
             do_fetch(Requests, Timeout)
-    after
-        ocp:finish_span()
     end.
 
 -spec replicate(Pool, Topic, ExpectedId, RecordBatch, Timeout)
@@ -208,56 +205,46 @@ produce(Topic, RecordBatch, Timeout) ->
     produce_(Topic, EncodedRecordBatch, Timeout).
 
 produce_(Topic, EncodedRecordBatch, Timeout) ->
-    ocp:start_span(<<"vg_client:produce">>),
-    try
-        case vg_client_pool:get_pool(Topic, write) of
-            {ok, Pool} ->
-                lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
-                TopicRecords = [{Topic, [{0, EncodedRecordBatch}]}],
-                Restart = application:get_env(vonnegut, swap_restart, true),
-                Request = vg_protocol:encode_produce(0, 5000, TopicRecords),
-                case scall(Pool, ?PRODUCE_REQUEST, Request, Timeout) of
-                    {ok, #{Topic := #{0 := #{error_code := 0,
-                                             offset := Offset}}}} ->
-                        {ok, Offset};
-                    {ok, #{Topic := #{0 := #{error_code := ?TIMEOUT_ERROR}}}} ->
-                        {error, timeout};
-                    %% sometimes because of cloud orchestration, and
-                    %% restarts, head and tail nodes will switch or
-                    %% move around in time for us to reconnect to them
-                    %% in error, so if we get these codes, start over
-                    {ok, #{Topic := #{0 := #{error_code := ?PRODUCE_DISALLOWED_ERROR}}}}
-                      when Restart =:= true ->
-                        lager:info("disallowed request error, restarting pools"),
-                        vg_client_pool:restart(),
-                        produce_(Topic, EncodedRecordBatch, Timeout);
-                    {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
-                        {error, ErrorCode};
-                    {error, Reason} ->
-                        {error, Reason}
-                end;
-            {error, Reason} ->
-                {error, Reason}
-        end
-    after
-        ocp:finish_span()
+    case vg_client_pool:get_pool(Topic, write) of
+        {ok, Pool} ->
+            lager:debug("produce request to pool: ~p ~p", [Topic, Pool]),
+            TopicRecords = [{Topic, [{0, EncodedRecordBatch}]}],
+            Restart = application:get_env(vonnegut, swap_restart, true),
+            Request = vg_protocol:encode_produce(0, 5000, TopicRecords),
+            case scall(Pool, ?PRODUCE_REQUEST, Request, Timeout) of
+                {ok, #{Topic := #{0 := #{error_code := 0,
+                                         offset := Offset}}}} ->
+                    {ok, Offset};
+                {ok, #{Topic := #{0 := #{error_code := ?TIMEOUT_ERROR}}}} ->
+                    {error, timeout};
+                %% sometimes because of cloud orchestration, and
+                %% restarts, head and tail nodes will switch or
+                %% move around in time for us to reconnect to them
+                %% in error, so if we get these codes, start over
+                {ok, #{Topic := #{0 := #{error_code := ?PRODUCE_DISALLOWED_ERROR}}}}
+                  when Restart =:= true ->
+                    lager:info("disallowed request error, restarting pools"),
+                    vg_client_pool:restart(),
+                    produce_(Topic, EncodedRecordBatch, Timeout);
+                {ok, #{Topic := #{0 := #{error_code := ErrorCode}}}} ->
+                    {error, ErrorCode};
+                {error, Reason} ->
+                    {error, Reason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 topics() ->
     topics(metadata, []).
 
 topics(Pool, Topics) ->
-    ocp:start_span(<<"vg_client:topics">>),
-    try
-        Request = vg_protocol:encode_array([<<(byte_size(T)):16/signed-integer, T/binary>> || T <- Topics]),
-        case scall(Pool, ?TOPICS_REQUEST, Request, ?TIMEOUT) of
-            {ok, {_, _}} = OK ->
-                OK;
-            {error, Reason} ->
-                {error, Reason}
-        end
-    after
-        ocp:finish_span()
+    Request = vg_protocol:encode_array([<<(byte_size(T)):16/signed-integer, T/binary>> || T <- Topics]),
+    case scall(Pool, ?TOPICS_REQUEST, Request, ?TIMEOUT) of
+        {ok, {_, _}} = OK ->
+            OK;
+        {error, Reason} ->
+            {error, Reason}
     end.
 
 -spec init() -> {ok, term()}.

@@ -3,7 +3,7 @@ vonnegut
 
 [![CircleCI](https://circleci.com/gh/SpaceTime-IoT/vonnegut.svg?style=svg)](https://circleci.com/gh/SpaceTime-IoT/vonnegut)
 
-[![Coverage Status](https://coveralls.io/repos/github/SpaceTime-IoT/vonnegut/badge.svg?branch=master)](https://coveralls.io/github/SpaceTime-IoT/vonnegut?branch=master)
+[![codecov](https://codecov.io/gh/SpaceTime-IoT/vonnegut/branch/master/graph/badge.svg)](https://codecov.io/gh/SpaceTime-IoT/vonnegut)
 
 Vonnegut is a append-only log that follows the file format and API of Kafka 1.0. The server can be run standalone, with 1 or more chains each with 1 or more replicas, or as part of another Erlang release which can talk to it directly.
 

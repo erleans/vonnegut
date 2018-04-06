@@ -43,7 +43,7 @@ start(Opts, N) ->
                                 ok
                         end
                     catch _:_Reason ->
-                            lager:warning("at=start_pools error=~p", [_Reason]),
+                            lager:warning("at=start_pools error=~p stacktrace=~p", [_Reason, erlang:get_stacktrace()]),
                             timer:sleep(500),
                             start(Opts, N + 1)
                     end
