@@ -43,7 +43,7 @@ start(Opts, N) ->
                                 ok
                         end
                     catch _:_Reason ->
-                            lager:warning("at=start_pools error=~p", [_Reason]),
+                            lager:warning("at=start_pools error=~p stacktrace=~p", [_Reason, erlang:get_stacktrace()]),
                             timer:sleep(500),
                             start(Opts, N + 1)
                     end
@@ -154,6 +154,8 @@ start_pool(Name, Opts) ->
                   {packet, raw},
                   {send_timeout, 5000},
                   {send_timeout_close, true}],
+    Pools = application:get_env(vonnegut, client_pools, []),
+    application:set_env(vonnegut, client_pools, [Name | Pools]),
     shackle_pool:start(Name, vg_client,
                        [{ip, maps:get(ip, Opts, "127.0.0.1")},
                         {port, maps:get(port, Opts, 5555)},
