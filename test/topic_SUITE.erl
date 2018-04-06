@@ -6,10 +6,16 @@
 
 all() ->
     [creation, write_empty, write, index_bug, limit, index_limit,
-     startup_index_correctness, many, verify_lazy_load,
+     many, verify_lazy_load, startup_index_correctness,
      local_client_test, last_in_index].
 
 init_per_suite(Config) ->
+    Config.
+
+end_per_suite(_Config) ->
+    ok.
+
+init_per_testcase(_, Config) ->
     PrivDir = ?config(priv_dir, Config),
     %% clear env from other suites
     application:unload(vonnegut),
@@ -21,14 +27,6 @@ init_per_suite(Config) ->
     application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
     application:set_env(vonnegut, client_pool_size, 2),
     {ok, _} = application:ensure_all_started(vonnegut),
-    Config.
-
-end_per_suite(_Config) ->
-    application:stop(vonnegut),
-    application:unload(vonnegut),
-    ok.
-
-init_per_testcase(_, Config) ->
     ok = vg_client_pool:start(#{reconnect => false}),
     Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
     {ok, _} = vg_client:ensure_topic(Topic),
