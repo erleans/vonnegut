@@ -1,7 +1,7 @@
 %%
 -module(vg_active_segment).
 
--behaviour(gen_server).
+-behaviour(gen_statem).
 
 -export([start_link/3,
          write/3,
@@ -13,11 +13,11 @@
          resume_indexing/2]).
 
 -export([init/1,
-         handle_call/3,
-         handle_cast/2,
-         handle_info/2,
-         terminate/2,
-         code_change/3]).
+         callback_mode/0,
+         active/3,
+         halted/3,
+         handle_event/3,
+         terminate/3]).
 
 -include("vg.hrl").
 
@@ -26,22 +26,24 @@
                  index_max_bytes      :: integer(),
                  index_interval_bytes :: integer()}).
 
--record(state, {topic_dir      :: file:filename(),
-                next_id        :: integer(),
-                next_brick     :: atom(),
-                byte_count     :: integer(),
-                pos            :: integer(),
-                index_pos      :: integer(),
-                log_fd         :: file:fd(),
-                segment_id     :: integer(),
-                index_fd       :: file:fd() | undefined,
-                topic          :: binary(),
-                partition      :: integer(),
-                config         :: #config{},
-                halted = false :: boolean(),
-                index = true   :: boolean(),
-                tailer         :: pid() | undefined
-               }).
+-record(data, {topic_dir       :: file:filename(),
+               next_id         :: integer(),
+               next_brick      :: atom(),
+               byte_count      :: integer(),
+               pos             :: integer(),
+               index_pos       :: integer(),
+               log_fd          :: file:fd(),
+               segment_id      :: integer(),
+               index_fd        :: file:fd() | undefined,
+               topic           :: binary(),
+               partition       :: integer(),
+               config          :: #config{},
+               halted = false  :: boolean(),
+               index = true    :: boolean(),
+               tailer          :: pid() | undefined,
+               terminate_after :: integer(),
+               timer_ref       :: reference()
+              }).
 
 %% need this until an Erlang release with `hibernate_after` spec added to gen option type
 -dialyzer({nowarn_function, start_link/3}).
@@ -49,8 +51,9 @@
 -define(ACTIVE_SEG(Topic, Partition), {via, gproc, {n, l, {active, Topic, Partition}}}).
 
 start_link(Topic, Partition, NextBrick) ->
-    case gen_server:start_link(?ACTIVE_SEG(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick],
-                               [{hibernate_after, timer:minutes(5)}]) of % hibernate after 5 minutes with no messages
+    HibernateAfter = application:get_env(vonnegut, hibernate_after, timer:minutes(1)),
+    case gen_statem:start_link(?ACTIVE_SEG(Topic, Partition), ?MODULE, [Topic, Partition, NextBrick],
+                               [{hibernate_after, HibernateAfter}]) of % hibernate after 5 minutes with no messages
         {ok, Pid} ->
             {ok, Pid};
         {error, {already_started, Pid}} ->
@@ -74,7 +77,7 @@ write(Topic, Partition, ExpectedId, RecordBatch) ->
 
 write_(Topic, Partition, ExpectedId, RecordBatch) ->
     try
-        case gen_server:call(?ACTIVE_SEG(Topic, Partition), {write, ExpectedId, RecordBatch}) of
+        case gen_statem:call(?ACTIVE_SEG(Topic, Partition), {write, ExpectedId, RecordBatch}) of
             retry ->
                 write_(Topic, Partition, ExpectedId, RecordBatch);
             R -> R
@@ -93,20 +96,20 @@ create_retry(Topic, Partition, ExpectedId, RecordBatch)->
     write_(Topic, Partition, ExpectedId, RecordBatch).
 
 halt(Topic, Partition) ->
-    gen_server:call(?ACTIVE_SEG(Topic, Partition), halt).
+    gen_statem:call(?ACTIVE_SEG(Topic, Partition), halt).
 
 tail(Topic, Partition, Printer) ->
-    gen_server:call(?ACTIVE_SEG(Topic, Partition), {tail, Printer}).
+    gen_statem:call(?ACTIVE_SEG(Topic, Partition), {tail, Printer}).
 
 where(Topic, Partition) ->
     {_, _, Where} = ?ACTIVE_SEG(Topic, Partition),
     gproc:where(Where).
 
 stop_indexing(Topic, Partition) ->
-    gen_server:call(?ACTIVE_SEG(Topic, Partition), stop_indexing).
+    gen_statem:call(?ACTIVE_SEG(Topic, Partition), stop_indexing).
 
 resume_indexing(Topic, Partition) ->
-    gen_server:call(?ACTIVE_SEG(Topic, Partition), resume_indexing).
+    gen_statem:call(?ACTIVE_SEG(Topic, Partition), resume_indexing).
 
 %%%%%%%%%%%%
 
@@ -115,6 +118,7 @@ init([Topic, Partition, NextNode]) ->
     Config = setup_config(),
     Partition = 0,
     LogDir = Config#config.log_dir,
+    TerminateAfter = application:get_env(vonnegut, terminate_after, timer:minutes(5)),
     TopicDir = filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]),
     filelib:ensure_dir(filename:join(TopicDir, "ensure")),
 
@@ -130,41 +134,53 @@ init([Topic, Partition, NextNode]) ->
 
     vg_topics:insert_hwm(Topic, Partition, Id),
 
-    {ok, #state{next_id = Id + 1,
-                next_brick = NextNode,
-                topic_dir = TopicDir,
-                byte_count = 0,
-                pos = Position,
-                index_pos = IndexPosition,
-                log_fd = LogFD,
-                segment_id = list_to_integer(LastLogId),
-                index_fd = IndexFD,
-                topic = Topic,
-                partition = Partition,
-                config = Config
-               }}.
+    {ok, active, #data{next_id = Id + 1,
+                       next_brick = NextNode,
+                       topic_dir = TopicDir,
+                       byte_count = 0,
+                       pos = Position,
+                       index_pos = IndexPosition,
+                       log_fd = LogFD,
+                       segment_id = list_to_integer(LastLogId),
+                       index_fd = IndexFD,
+                       topic = Topic,
+                       partition = Partition,
+                       config = Config,
+                       terminate_after = TerminateAfter,
+                       timer_ref = erlang:start_timer(TerminateAfter, self(), terminate)
+                      }}.
 
-%% coverall to keep any new writes from coming in while we delete the topic
-handle_call(_Msg, _From, State = #state{halted = true}) ->
-    {reply, halted, State};
-handle_call(halt, _From, State) ->
-    {reply, ok, State#state{halted = true}};
-handle_call({tail, Printer}, _From, State) ->
+callback_mode() ->
+    state_functions.
+
+%% keep any new writes from coming in while we delete the topic
+halted({call, From}, _, _) ->
+    {keep_state_and_data, [{reply, From, halted}]}.
+
+active({call, From}, halt, Data) ->
+    {next_state, halted, Data, [{reply, From, ok}]};
+active({call, From}, {tail, Printer}, Data) ->
     monitor(process, Printer),
-    {reply, ok, State#state{tailer = Printer}};
-handle_call(stop_indexing, _From, #state{index_fd = undefined} = State) ->
-    {reply, ok, State#state{index = false}};
-handle_call(stop_indexing, _From, #state{index_fd = FD} = State) ->
+    {keep_state, Data#data{tailer = Printer}, [{reply, From, ok}]};
+active({call, From}, stop_indexing, Data=#data{index_fd=undefined}) ->
+    {keep_state, Data#data{index = false}, [{reply, From, ok}]};
+active({call, From}, stop_indexing, Data=#data{index_fd=FD}) ->
     %% no need to sync here, we're about to unlink
     file:close(FD),
-    {reply, ok, State#state{index = false, index_fd = undefined}};
-handle_call(resume_indexing, _From, State) ->
-    {reply, ok, State#state{index = true}};
-handle_call({write, ExpectedID0, Record=#{last_offset_delta := LastOffsetDelta,
-                                          record_batch := RecordBatch}}, _From, State=#state{next_id=ID,
+    {keep_state, Data#data{index = false, index_fd = undefined}, [{reply, From, ok}]};
+active({call, From}, resume_indexing, Data) ->
+    {keep_state, Data#data{index = true}, [{reply, From, ok}]};
+active({call, From}, {write, ExpectedID0, Record=#{last_offset_delta := LastOffsetDelta,
+                                                   record_batch := RecordBatch}}, Data=#data{next_id=ID,
                                                                                              tailer=Tailer,
                                                                                              topic=Topic,
-                                                                                             next_brick=NextBrick}) ->
+                                                                                             next_brick=NextBrick,
+                                                                                             terminate_after=TerminateAfter,
+                                                                                             timer_ref=TRef}) ->
+    erlang:cancel_timer(TRef),
+    TRef1 = erlang:start_timer(TerminateAfter, self(), terminate),
+    Data1 = Data#data{timer_ref=TRef1},
+
     %% TODO: add pipelining of requests
     try
         ExpectedID =
@@ -184,8 +200,8 @@ handle_call({write, ExpectedID0, Record=#{last_offset_delta := LastOffsetDelta,
                             %% we're going back too far, we need to be
                             %% in some sort of catch-up mode
                             lager:debug("starting write repair, ~p", [WriterID]),
-                            WriteRepairSet = write_repair(WriterID, State),
-                            throw({write_repair, WriteRepairSet, State})
+                            WriteRepairSet = write_repair(WriterID, Data1),
+                            throw({write_repair, WriteRepairSet, Data1})
                     end
             end,
 
@@ -210,100 +226,96 @@ handle_call({write, ExpectedID0, Record=#{last_offset_delta := LastOffsetDelta,
         case Result of
             Go when Go =:= proceed orelse
                     element(1, Go) =:= ok ->
-                State1 = write_record_batch(Record, State),
+                Data2 = write_record_batch(Record, Data1),
                 case Tailer of
                     undefined ->
                         ok;
                     Pid ->
-                        Pid ! {'$print', {State1#state.next_id - 1, Record}}
+                        Pid ! {'$print', {Data2#data.next_id - 1, Record}}
                 end,
-                {reply, {ok, State1#state.next_id - 1}, State1};
+                {keep_state, Data2, [{reply, From, {ok, Data2#data.next_id - 1}}]};
             {write_repair, RepairSet} ->
                 prometheus_counter:inc(write_repairs),
                 %% add in the following when pipelining is added, if it makes sense
                 %% prometheus_gauge:inc(pending_write_repairs, length(RepairSet)),
-                State1 = write_record_batch(RepairSet, State),
+                Data2 = write_record_batch(RepairSet, Data1),
                 case ExpectedID0 of
                     head ->
-                        {reply, retry, State1};
+                        {keep_state, Data2, [{reply, From, retry}]};
                     _ ->
-                        {reply, {write_repair, RepairSet}, State1}
+                        {keep_state, Data2, [{reply, From, {write_repair, RepairSet}}]}
                 end;
             {error, Reason} ->
-                {reply, {error, Reason}, State}
+                {keep_state, Data1, [{reply, From, {error, Reason}}]}
         end
-    catch throw:{write_repair, RS, S} ->
-            {reply, {write_repair, RS}, S};
-          throw:{E, S} ->
-            {reply, {error, E}, S}
+    catch throw:{write_repair, RS, D} ->
+            {keep_state, D, [{reply, From, {write_repair, RS}}]};
+          throw:{E, D} ->
+            {keep_state, D, [{reply, From, {error, E}}]}
     end;
-handle_call(_Msg, _From, State) ->
-    lager:info("bad call ~p ~p", [_Msg, _From]),
-    {noreply, State}.
+active(Type, Event, Data) ->
+    handle_event(Type, Event, Data).
 
-handle_cast(_Msg, State) ->
-    lager:info("bad cast ~p", [_Msg]),
-    {noreply, State}.
 
-handle_info({'DOWN', _MonitorRef, _Type, _Object, _Info}, State) ->
-    {noreply, State#state{tailer = undefined}};
-handle_info(_, State) ->
-    {noreply, State}.
+handle_event(info, {timeout, _TRef, terminate}, _Data) ->
+    {stop, normal};
+handle_event(info, {'DOWN', _MonitorRef, _Type, _Object, _Info}, Data) ->
+    {keep_state, Data#data{tailer = undefined}}.
 
-terminate(_Reason, _State) ->
+terminate(_, _Reason, _Data=#data{log_fd=LogFile,
+                                  index_fd=IndexFile}) ->
+    file:close(LogFile),
+    file:close(IndexFile),
     ok.
 
-code_change(_, State, _) ->
-    {ok, State}.
+%
 
-%%
-
-write_record_batch(Batches, State) when is_list(Batches) ->
-    lists:foldl(fun(Batch, StateAcc) ->
-                        write_record_batch(Batch, StateAcc)
-                end, State, Batches);
+write_record_batch(Batches, Data) when is_list(Batches) ->
+    lists:foldl(fun(Batch, DataAcc) ->
+                        write_record_batch(Batch, DataAcc)
+                end, Data, Batches);
 write_record_batch(#{last_offset_delta := LastOffsetDelta,
                      size := Size0,
-                     record_batch := Bytes}, State=#state{topic=Topic,
-                                                          partition=Partition,
-                                                          next_id=Id,
-                                                          byte_count=ByteCount}) ->
+                     record_batch := Bytes}, Data=#data{topic=Topic,
+                                                        partition=Partition,
+                                                        next_id=Id,
+                                                        byte_count=ByteCount}) ->
     Size = Size0 + ?OFFSET_AND_LENGTH_BYTES,
     NextId = Id + LastOffsetDelta + 1,
-    State1 = #state{pos=Position1,
-                    log_fd=LogFile} = maybe_roll(Size, State),
+    Data1 = #data{pos=Position1,
+                  log_fd=LogFile} = maybe_roll(Size, Data),
 
     %% write to log
     ok = file:write(LogFile, [<<Id:64/signed-integer, Size0:32/signed-integer>>, Bytes]),
-    State2 = State1#state{byte_count=ByteCount+Size},
+    Data2 = Data1#data{byte_count=ByteCount+Size},
 
     %% maybe write index entry
-    State3 = update_index(State2),
+    Data3 = update_index(Data2),
 
     %% update highwatermark in ets table
     vg_topics:update_hwm(Topic, Partition, NextId-1),
 
-    State3#state{next_id=NextId,
-                 pos=Position1+Size}.
+    Data3#data{next_id=NextId,
+               pos=Position1+Size}.
 
 %% Create new log segment and index file if current segment is too large
 %% or if the index file is over its max and would be written to again.
-maybe_roll(Size, State=#state{next_id=Id,
-                              topic_dir=TopicDir,
-                              log_fd=LogFile,
-                              index_fd=IndexFile,
-                              pos=Position,
-                              byte_count=ByteCount,
-                              index_pos=IndexPosition,
-                              index = Indexing,
-                              topic=Topic,
-                              partition=Partition,
-                              config=#config{segment_bytes=SegmentBytes,
-                                             index_max_bytes=IndexMaxBytes,
-                                             index_interval_bytes=IndexIntervalBytes}})
+maybe_roll(Size, Data=#data{next_id=Id,
+                            topic_dir=TopicDir,
+                            log_fd=LogFile,
+                            index_fd=IndexFile,
+                            pos=Position,
+                            byte_count=ByteCount,
+                            index_pos=IndexPosition,
+                            index = Indexing,
+                            topic=Topic,
+                            partition=Partition,
+                            config=#config{segment_bytes=SegmentBytes,
+                                           index_max_bytes=IndexMaxBytes,
+                                           index_interval_bytes=IndexIntervalBytes}})
   when Position+Size > SegmentBytes
-     orelse (ByteCount+Size >= IndexIntervalBytes
-            andalso IndexPosition+?INDEX_ENTRY_SIZE > IndexMaxBytes) ->
+       orelse (ByteCount+Size >= IndexIntervalBytes
+               andalso IndexPosition+?INDEX_ENTRY_SIZE > IndexMaxBytes) ->
     lager:debug("seg size ~p max size ~p", [Position+Size, SegmentBytes]),
     lager:debug("index interval size ~p max size ~p", [ByteCount+Size, IndexIntervalBytes]),
     lager:debug("index pos ~p max size ~p", [IndexPosition+?INDEX_ENTRY_SIZE, IndexMaxBytes]),
@@ -321,39 +333,39 @@ maybe_roll(Size, State=#state{next_id=Id,
     {NewIndexFile, NewLogFile} = vg_log_segments:new_index_log_files(TopicDir, Id),
     vg_log_segments:insert(Topic, Partition, Id),
 
-    State#state{log_fd=NewLogFile,
-                index_fd=NewIndexFile,
-                %% we assume here that new indexes are good, and
-                %% re-enable writing, expecting the old indexes to
-                %% catch up eventually.  This might be racy
-                index = true,
-                segment_id = Id,
-                byte_count=0,
-                pos=0,
-                index_pos=0};
-maybe_roll(_, State) ->
-    State.
+    Data#data{log_fd=NewLogFile,
+              index_fd=NewIndexFile,
+              %% we assume here that new indexes are good, and
+              %% re-enable writing, expecting the old indexes to
+              %% catch up eventually.  This might be racy
+              index = true,
+              segment_id = Id,
+              byte_count=0,
+              pos=0,
+              index_pos=0};
+maybe_roll(_, Data) ->
+    Data.
 
 %% skip writing indexes if they're disabled.
-update_index(State=#state{index = false}) ->
-    State;
+update_index(Data=#data{index = false}) ->
+    Data;
 %% Add to index if the number of bytes written to the log since the last index record was written
-update_index(State=#state{next_id=Id,
-                          pos=Position,
-                          index_fd=IndexFile,
-                          byte_count=ByteCount,
-                          index_pos=IndexPosition,
-                          segment_id=BaseOffset,
-                          config=#config{index_interval_bytes=IndexIntervalBytes}})
+update_index(Data=#data{next_id=Id,
+                        pos=Position,
+                        index_fd=IndexFile,
+                        byte_count=ByteCount,
+                        index_pos=IndexPosition,
+                        segment_id=BaseOffset,
+                        config=#config{index_interval_bytes=IndexIntervalBytes}})
   when ByteCount >= IndexIntervalBytes ->
     IndexEntry = <<(Id - BaseOffset):?INDEX_OFFSET_BITS/unsigned, Position:?INDEX_OFFSET_BITS/unsigned>>,
     ok = file:write(IndexFile, IndexEntry),
-    State#state{index_pos=IndexPosition+?INDEX_ENTRY_SIZE,
+    Data#data{index_pos=IndexPosition+?INDEX_ENTRY_SIZE,
                 byte_count=0};
-update_index(State) ->
-    State.
+update_index(Data) ->
+    Data.
 
-write_repair(Start, #state{next_id = ID, topic = Topic, partition = Partition} = _State) ->
+write_repair(Start, #data{next_id = ID, topic = Topic, partition = Partition}) ->
     %% two situations: replaying single-segment writes, and writes
     %% that span multiple segments
     {StartSegmentID, {StartPosition, _}} = vg_log_segments:find_segment_offset(Topic, Partition, Start),

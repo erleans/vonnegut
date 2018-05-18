@@ -2,12 +2,13 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
+-include("test_utils.hrl").
 -compile(export_all).
 
 all() ->
     [creation, write_empty, write, index_bug, limit, index_limit,
      many, verify_lazy_load, startup_index_correctness,
-     local_client_test, last_in_index].
+     local_client_test, last_in_index, terminate_idle_active_segment].
 
 init_per_suite(Config) ->
     Config.
@@ -15,6 +16,23 @@ init_per_suite(Config) ->
 end_per_suite(_Config) ->
     ok.
 
+init_per_testcase(terminate_idle_active_segment, Config) ->
+    PrivDir = ?config(priv_dir, Config),
+    %% clear env from other suites
+    application:unload(vonnegut),
+    application:load(vonnegut),
+    application:load(partisan),
+    application:set_env(vonnegut, terminate_after, timer:seconds(1)),
+    application:set_env(partisan, partisan_peer_service_manager, partisan_default_peer_service_manager),
+    application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
+    application:set_env(vonnegut, chain, [{discovery, local}]),
+    application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5588}]}]),
+    application:set_env(vonnegut, client_pool_size, 2),
+    {ok, _} = application:ensure_all_started(vonnegut),
+    ok = vg_client_pool:start(#{reconnect => false}),
+    Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
+    {ok, _} = vg_client:ensure_topic(Topic),
+    [{topic, Topic} | Config];
 init_per_testcase(_, Config) ->
     PrivDir = ?config(priv_dir, Config),
     %% clear env from other suites
@@ -325,4 +343,13 @@ local_client_test(Config) ->
                        [#{offset := 0,
                           value := <<"foo">>}]},
                  Ret),
+    ok.
+
+terminate_idle_active_segment(Config) ->
+    Topic = ?config(topic, Config),
+    %% verify it is running
+    {ok, _} = vg:write(Topic, 0, <<"foo">>),
+    ?assertNotEqual(undefined, vg_active_segment:where(Topic, 0)),
+    %% after a second it should terminate and be undefined
+    ?UNTIL(vg_active_segment:where(Topic, 0) =:= undefined),
     ok.

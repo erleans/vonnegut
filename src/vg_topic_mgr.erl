@@ -1,3 +1,5 @@
+%% doesn't need to be constantly running along side the active segment.
+%% TODO: turn into a one off proc that triggers when needed.
 -module(vg_topic_mgr).
 
 -behaviour(gen_server).
