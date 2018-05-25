@@ -215,8 +215,8 @@ create_chain(Name, []) ->
            nodes = [node()],
            topics_start = start_space,
            topics_end = end_space,
-           head  = {"127.0.0.1", 5555},
-           tail  = {"127.0.0.1", 5555}};
+           head  = {"127.0.0.1", 5588},
+           tail  = {"127.0.0.1", 5588}};
 create_chain(Name, Nodes) ->
     #chain{name  = Name,
            nodes = [nodename(Node) || Node <- Nodes],

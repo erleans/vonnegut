@@ -24,7 +24,7 @@ init_per_testcase(_, Config) ->
     application:set_env(partisan, partisan_peer_service_manager, partisan_default_peer_service_manager),
     application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
     application:set_env(vonnegut, chain, [{discovery, local}]),
-    application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
+    application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5588}]}]),
     application:set_env(vonnegut, client_pool_size, 2),
     {ok, _} = application:ensure_all_started(vonnegut),
     ok = vg_client_pool:start(#{reconnect => false}),

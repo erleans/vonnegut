@@ -5,7 +5,7 @@
          cluster_type/0,
          replicas/0]).
 
--define(DEFAULT_PORT, 5555).
+-define(DEFAULT_PORT, 5588).
 
 -type cluster_type() :: local | {direct, [any()]} | {srv, string()} | none.
 

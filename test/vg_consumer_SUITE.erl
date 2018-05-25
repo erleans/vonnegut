@@ -17,7 +17,7 @@ init_per_suite(Config) ->
     application:set_env(vonnegut, segment_bytes, 86),
     application:set_env(vonnegut, index_max_bytes, 18),
     application:set_env(vonnegut, index_interval_bytes, 24),
-    application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
+    application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5588}]}]),
     application:set_env(vonnegut, chain, [{discovery, local}]),
     application:start(shackle),
     application:ensure_all_started(vonnegut),

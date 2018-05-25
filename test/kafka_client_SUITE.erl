@@ -19,7 +19,7 @@ init_per_suite(Config) ->
     application:set_env(vonnegut, chain, [{discovery, local}]),
     crypto:start(),
 
-    Port = 5555,
+    Port = 5588,
     Host = <<"127.0.0.1">>,
     Hosts = [{"127.0.0.1", Port}],
 
