@@ -30,28 +30,49 @@ start(Opts, N) ->
             case proplists:get_value(endpoints, ClientConfig) of
                 undefined ->
                     lager:error("No endpoints configured for client");
-                [{Host, Port} | _] ->
-                    start_pool(metadata, Opts#{ip => Host,
-                                               port => Port}),
-                    try
-                        case vg_client:topics() of
-                            {ok, {_, Chains}} ->
-                                maybe_init_ets(),
-                                _ = start_pools(Chains),
-                                application:set_env(vonnegut, chains, Chains),
-                                refresh_topic_map(),
-                                ok
-                        end
-                    catch _:_Reason ->
-                            lager:warning("at=start_pools error=~p stacktrace=~p", [_Reason, erlang:get_stacktrace()]),
-                            timer:sleep(500),
-                            start(Opts, N + 1)
+                [{Host, Port} | _] when is_integer(Port) ->
+                    start_(Opts, N, Host, Port);
+                [HostPort | _] when is_list(HostPort) ->
+                    case parse_host_port(HostPort) of
+                        {ok, Host, Port} -> start_(Opts, N, Host, Port);
+                        {error, _} -> lager:error("Invalid endpoint ~p", HostPort)
                     end
             end;
         _ ->
             lager:info("No client configuration")
     end.
 
+start_(Opts, N, Host, Port) ->
+  start_pool(metadata, Opts#{ip => Host,
+                             port => Port}),
+  try
+      case vg_client:topics() of
+          {ok, {_, Chains}} ->
+              maybe_init_ets(),
+              _ = start_pools(Chains),
+              application:set_env(vonnegut, chains, Chains),
+              refresh_topic_map(),
+              ok
+      end
+  catch _:_Reason ->
+          lager:warning("at=start_pools error=~p stacktrace=~p", [_Reason, erlang:get_stacktrace()]),
+          timer:sleep(500),
+          start(Opts, N + 1)
+  end.
+
+parse_host_port(HostPortString) ->
+    case string:split(HostPortString, ":", all) of
+        [Host] ->
+            {ok, Host, ?DEFAULT_PORT};
+        [Host, Port] ->
+            case string:to_integer(Port) of
+                {IntegerPort, ""} -> {ok, Host, IntegerPort};
+                {_, _}            -> {error, invalid_host_port_string}
+            end;
+        [_|_] ->
+            {error, invalid_host_port_string}
+    end.
+  
 start_pools(Chains) ->
     [begin
          Name = <<HeadHost/binary, "-", (integer_to_binary(HeadPort))/binary>>,
