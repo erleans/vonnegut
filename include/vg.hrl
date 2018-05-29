@@ -1,4 +1,5 @@
 -define(CLIENT_ID, "vg_client").
+-define(DEFAULT_PORT, 5555).
 -define(MAX_REQUEST_ID, 2147483647).
 
 -define(MAGIC_TWO, 2).
