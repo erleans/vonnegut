@@ -48,9 +48,9 @@ make_args(Inverse, N0) ->
 
     Chain = case Inverse of
                 true ->
-                    chain(5555 + N0);
+                    chain(5588 + N0);
                 false ->
-                    inverse_chain(5557 - N0)
+                    inverse_chain(5590 - N0)
             end,
     [{kill_if_fail, true},
      {monitor_master, true},
@@ -95,18 +95,18 @@ test_node(N) ->
 
 chain(N) ->
     [{name, chain1},
-     {discovery, {direct, [{'chain1-0', "127.0.0.1", 15555, 5555},
-                           {'chain1-1', "127.0.0.1", 15556, 5556},
-                           {'chain1-2', "127.0.0.1", 15557, 5557}
+     {discovery, {direct, [{'chain1-0', "127.0.0.1", 15555, 5588},
+                           {'chain1-1', "127.0.0.1", 15556, 5589},
+                           {'chain1-2', "127.0.0.1", 15557, 5590}
                           ]}},
      {replicas, ?NUM_NODES},
      {port, N}].
 
 inverse_chain(N) ->
     [{name, chain1},
-     {discovery, {direct, [{'chain1-0', "127.0.0.1", 15555, 5557},
-                           {'chain1-1', "127.0.0.1", 15556, 5556},
-                           {'chain1-2', "127.0.0.1", 15557, 5555}
+     {discovery, {direct, [{'chain1-0', "127.0.0.1", 15555, 5590},
+                           {'chain1-1', "127.0.0.1", 15556, 5589},
+                           {'chain1-2', "127.0.0.1", 15557, 5588}
                           ]}},
      {replicas, ?NUM_NODES},
      {port, N}].
@@ -147,7 +147,7 @@ init_per_testcase(roles_w_reconnect, Config) ->
     %% wait for the cluster manager to be up before starting the pools
     case wait_for_mgr() of
         ok ->
-            application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
+            application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5588}]}]),
             %% start so we can test we get the errors first
             application:set_env(vonnegut, swap_restart, false),
             ok = vg_client_pool:start(),
@@ -162,7 +162,7 @@ init_per_testcase(_TestCase, Config) ->
     %% wait for the cluster manager to be up before starting the pools
     case wait_for_mgr() of
         ok ->
-            application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5555}]}]),
+            application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5588}]}]),
             ok = vg_client_pool:start(#{reconnect => false}),
             timer:sleep(750),
             Config;
@@ -264,7 +264,7 @@ roles(Config) ->
     %% try to do a read on the head
     {ok, WritePool} = vg_client_pool:get_pool(Topic, write),
     {ok, ReadPool} = vg_client_pool:get_pool(Topic, read),
-    vg_client_pool:start_pool(middle_end, #{ip => "127.0.0.1", port => 5556,
+    vg_client_pool:start_pool(middle_end, #{ip => "127.0.0.1", port => 5589,
                                             reconnect => false}),
 
     ReplicaId = -1,

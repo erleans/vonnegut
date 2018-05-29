@@ -179,7 +179,7 @@ start_pool(Name, Opts) ->
     application:set_env(vonnegut, client_pools, [Name | Pools]),
     shackle_pool:start(Name, vg_client,
                        [{ip, maps:get(ip, Opts, "127.0.0.1")},
-                        {port, maps:get(port, Opts, 5555)},
+                        {port, maps:get(port, Opts, 5588)},
                         {reconnect, maps:get(reconnect, Opts, true)},
                         {reconnect_time_max, 120000},
                         {reconnect_time_min, 250},
