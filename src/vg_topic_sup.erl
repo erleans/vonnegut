@@ -40,11 +40,11 @@ child_specs(Topic, Partition) ->
     Next = vg_chain_state:next(),
     [#{id      => {active, Topic, Partition},
        start   => {vg_active_segment, start_link, [Topic, Partition, Next]},
-       restart => permanent,
+       restart => transient,
        type    => worker},
      #{id      => {mgr, Topic, Partition},
        start   => {vg_topic_mgr, start_link, [Topic, Partition, Next]},
-       restart => permanent,
+       restart => transient,
        type    => worker}
      | case application:get_env(vonnegut, log_cleaner, true) of
            true ->
