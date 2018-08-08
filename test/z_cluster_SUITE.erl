@@ -560,9 +560,16 @@ deactivate_list_topics(Config) ->
      end
      || N <- lists:seq(1, 10)],
 
+    [[?assert(filelib:is_dir(filename:join("data/node" ++ Node, <<"quux", (integer_to_binary(N))/binary, "-0">>)))
+     || N <- lists:seq(5, 14)] || Node <- ["0", "1", "2"]],
+
     %% delete a subset including some that are not active
     [ok = rpc:call(Head, vg, delete_topic, [<<"quux", (integer_to_binary(N))/binary>>])
      || N <- lists:seq(5, 14)],
+
+    %% verify the topic dir is deleted from each node
+    [[?assertNot(filelib:is_dir(filename:join("data/node" ++ Node, <<"quux", (integer_to_binary(N))/binary, "-0">>)))
+     || N <- lists:seq(5, 14)] || Node <- ["0", "1", "2"]],
 
     %% make sure they're not running anymore via list and fetch
     Topics4 = rpc:call(Head1, vg, running_topics, []),
@@ -583,6 +590,17 @@ deactivate_list_topics(Config) ->
     ?assertMatch({ok, 0} , vg_client:produce(<<"quux6">>, <<"blerp2">>)),
     ?assertMatch({error,{<<"quux12">>,not_found}}, vg_client:fetch(<<"quux12">>, 10, 1)),
     ?assertMatch({error,{<<"quux7">>,not_found}}, vg_client:fetch(<<"quux7">>, 10, 2)),
+
+
+    %% test delete over client protocol
+    %% delete a subset including some that are not active
+    [?assert(filelib:is_dir(filename:join("data/node" ++ Node, <<"quux2-0">>)))
+     || Node <- ["0", "1", "2"]],
+
+    vg_client:delete_topic(<<"quux2">>),
+
+    [?assertNot(filelib:is_dir(filename:join("data/node" ++ Node, <<"quux2-0">>)))
+     || Node <- ["0", "1", "2"]],
 
     Config.
 

@@ -4,6 +4,7 @@
 
 -export([metadata/0, metadata/1,
          ensure_topic/1,
+         delete_topic/1,
          topics/0, topics/2,
          fetch/1, fetch/2, fetch/3,
 
@@ -180,10 +181,22 @@ replicate(Pool, Topic, ExpectedId, RecordBatch, Timeout) ->
             {error, Reason}
     end.
 
+delete_topic(Topic) ->
+    case vg_client_pool:get_pool(Topic, write) of
+        {ok, Pool} ->
+            Request = vg_protocol:encode_delete_topic(Topic),
+            case scall(Pool, ?DELETE_TOPIC_REQUEST, Request, timer:seconds(60)) of
+                {ok, ok} -> ok;
+                {error, Reason} -> {error, Reason}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
 delete_topic(Pool, Topic) ->
     lager:debug("delete_topic pool=~p topic=~p", [Pool, Topic]),
     Request = vg_protocol:encode_delete_topic(Topic),
-    case scall(Pool, ?DELETE_TOPIC_REQUEST, Request, timer:seconds(60)) of
+    case scall(Pool, ?REPLICATE_DELETE_TOPIC_REQUEST, Request, timer:seconds(60)) of
         {ok, ok} -> ok;
         {error, Reason} -> {error, Reason}
     end.

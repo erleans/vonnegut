@@ -352,6 +352,8 @@ decode_response(?REPLICATE_REQUEST, Response) ->
     decode_replicate_response(Response);
 decode_response(?DELETE_TOPIC_REQUEST, Response) ->
     decode_delete_topic_response(Response);
+decode_response(?REPLICATE_DELETE_TOPIC_REQUEST, Response) ->
+    decode_delete_topic_response(Response);
 decode_response(?TOPICS_REQUEST, Response) ->
     decode_topics_response(Response);
 decode_response(?METADATA_REQUEST, Response) ->
