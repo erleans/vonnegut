@@ -158,7 +158,7 @@ halted({call, From}, _, _) ->
     {keep_state_and_data, [{reply, From, halted}]}.
 
 active({call, From}, halt, Data) ->
-    {next_state, halted, Data, [{reply, From, ok}]};
+    {next_state, halted, Data, [{reply, From, halted}]};
 active({call, From}, {tail, Printer}, Data) ->
     monitor(process, Printer),
     {keep_state, Data#data{tailer = Printer}, [{reply, From, ok}]};

@@ -65,7 +65,7 @@ handle_call(delete_topic, _From, #state{topic = Topic, next = Next,
                                         partition = Partition} = State) ->
     %% halt the active segment
     lager:info("halting active segment"),
-    ok = vg_active_segment:halt(Topic, Partition),
+    halted = vg_active_segment:halt(Topic, Partition),
     %% delete the segments
     lager:info("deleting segments"),
     ok = vg_log_segments:delete_segments(Topic, Partition),

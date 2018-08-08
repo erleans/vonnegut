@@ -60,7 +60,8 @@ delete_segments(Topic, Partition) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     AllFiles = filelib:wildcard(filename:join(TopicDir, "*")),
     ok = lists:foreach(fun file:delete/1, AllFiles),
-    ok = file:del_dir(TopicDir).
+    file:del_dir(TopicDir),
+    ok.
 
 delete_indexes(Topic, Partition) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),

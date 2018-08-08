@@ -8,7 +8,8 @@
 all() ->
     [creation, write_empty, write, index_bug, limit, index_limit,
      many, verify_lazy_load, startup_index_correctness,
-     local_client_test, last_in_index, terminate_idle_active_segment].
+     local_client_test, last_in_index, terminate_idle_active_segment,
+     delete_topic].
 
 init_per_suite(Config) ->
     Config.
@@ -18,13 +19,14 @@ end_per_suite(_Config) ->
 
 init_per_testcase(terminate_idle_active_segment, Config) ->
     PrivDir = ?config(priv_dir, Config),
+    LogDir = filename:join(PrivDir, "data"),
     %% clear env from other suites
     application:unload(vonnegut),
     application:load(vonnegut),
     application:load(partisan),
     application:set_env(vonnegut, terminate_after, timer:seconds(1)),
     application:set_env(partisan, partisan_peer_service_manager, partisan_default_peer_service_manager),
-    application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
+    application:set_env(vonnegut, log_dirs, [LogDir]),
     application:set_env(vonnegut, chain, [{discovery, local}]),
     application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5588}]}]),
     application:set_env(vonnegut, client_pool_size, 2),
@@ -32,15 +34,16 @@ init_per_testcase(terminate_idle_active_segment, Config) ->
     ok = vg_client_pool:start(#{reconnect => false}),
     Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
     {ok, _} = vg_client:ensure_topic(Topic),
-    [{topic, Topic} | Config];
+    [{topic, Topic}, {log_dir, LogDir} | Config];
 init_per_testcase(_, Config) ->
     PrivDir = ?config(priv_dir, Config),
+    LogDir = filename:join(PrivDir, "data"),
     %% clear env from other suites
     application:unload(vonnegut),
     application:load(vonnegut),
     application:load(partisan),
     application:set_env(partisan, partisan_peer_service_manager, partisan_default_peer_service_manager),
-    application:set_env(vonnegut, log_dirs, [filename:join(PrivDir, "data")]),
+    application:set_env(vonnegut, log_dirs, [LogDir]),
     application:set_env(vonnegut, chain, [{discovery, local}]),
     application:set_env(vonnegut, client, [{endpoints, [{"127.0.0.1", 5588}]}]),
     application:set_env(vonnegut, client_pool_size, 2),
@@ -48,7 +51,7 @@ init_per_testcase(_, Config) ->
     ok = vg_client_pool:start(#{reconnect => false}),
     Topic = vg_test_utils:create_random_name(<<"topic_SUITE_default_topic">>),
     {ok, _} = vg_client:ensure_topic(Topic),
-    [{topic, Topic} | Config].
+    [{topic, Topic}, {log_dir, LogDir} | Config].
 
 end_per_testcase(_, _Config) ->
     vg_client_pool:stop(),
@@ -353,3 +356,19 @@ terminate_idle_active_segment(Config) ->
     %% after a second it should terminate and be undefined
     ?UNTIL(vg_active_segment:where(Topic, 0) =:= undefined),
     ok.
+
+delete_topic(Config) ->
+    Dir = ?config(log_dir, Config),
+    Topic = vg_test_utils:create_random_name(<<"topic_SUITE_delete_topic">>),
+    {ok, _} = vg_client:ensure_topic(Topic),
+
+    [begin
+         {ok, _} = vg_client:produce(Topic, <<"some datas">>)
+     end
+     || _ <- lists:seq(1, rand:uniform(20))],
+
+    ?assert(filelib:is_dir(filename:join(Dir, <<Topic/binary, "-0">>))),
+
+    vg_client:delete_topic(Topic),
+
+    ?assertNot(filelib:is_dir(filename:join(Dir, <<Topic/binary, "-0">>))).
