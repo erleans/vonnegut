@@ -54,8 +54,9 @@ start_(Opts, N, Host, Port) ->
               refresh_topic_map(),
               ok
       end
-  catch _:_Reason ->
-          lager:warning("at=start_pools error=~p stacktrace=~p", [_Reason, erlang:get_stacktrace()]),
+  catch
+      ?WITH_STACKTRACE(_, R, S)
+          lager:warning("at=start_pools error=~p stacktrace=~p", [R, S]),
           timer:sleep(500),
           start(Opts, N + 1)
   end.
