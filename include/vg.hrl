@@ -60,3 +60,9 @@
           tail  :: {inet:ip_address() | inet:hostname(), inet:port_number()}
          }).
 -type chain() :: #chain{}.
+
+-ifdef('OTP_RELEASE').
+-define(WITH_STACKTRACE(T, R, S), T:R:S ->).
+-else.
+-define(WITH_STACKTRACE(T, R, S), T:R -> S = erlang:get_stacktrace(),).
+-endif.
