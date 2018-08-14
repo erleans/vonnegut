@@ -79,7 +79,7 @@ validate_topic(B) when is_binary(B) ->
 validate_topic(_) ->
     {error, non_binary_topic}.
 
--spec write_record_batch(Topic, Partition, RecordBatch) -> ok | {error, any()} when
+-spec write_record_batch(Topic, Partition, RecordBatch) -> {ok, integer()} | {error, any()} when
       Topic :: topic(),
       Partition :: non_neg_integer(),
       RecordBatch :: vg:record_batch().

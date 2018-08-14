@@ -359,8 +359,8 @@ concurrent_fetch(_Config) ->
                    [?assertMatch({ok, _}, vg_client:fetch(Topic)) || _ <- lists:seq(0, 10)],
                    Self ! {done, N}
                catch
-                   C:T ->
-                       ct:pal("~p ~p ~p", [C, T, erlang:get_stacktrace()]),
+                   ?WITH_STACKTRACE(C, T, S)
+                       ct:pal("~p ~p ~p", [C, T, S]),
                        Self ! fail
                end
           end) || N <- lists:seq(0,  10)],
@@ -676,8 +676,8 @@ concurrent_perf(_Config) ->
                          io:fwrite(standard_error, "thread ~p fetch on topic ~p completed in ~p ms~n",
                                    [ID, Topic, FetchEnd - FetchStart])
                      catch
-                         C:T ->
-                             ct:pal("~p ~p ~p", [C, T, erlang:get_stacktrace()]),
+                         ?WITH_STACKTRACE(C, T, S)
+                             ct:pal("~p ~p ~p", [C, T, S]),
                              Self ! fail
                      end
              end,

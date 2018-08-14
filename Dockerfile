@@ -1,4 +1,14 @@
-FROM tsloughter/erlang-alpine:20.0.1 as builder
+FROM erlang:21.0.5-alpine as builder
+
+RUN apk add --no-cache --update tar curl git bash make libc-dev gcc g++ vim
+
+RUN set -xe \
+    && curl -fSL -o rebar3 "https://s3.amazonaws.com/rebar3-nightly/rebar3" \
+    && chmod +x ./rebar3 \
+    && ./rebar3 local install \
+    && rm ./rebar3
+
+ENV PATH "$PATH:/root/.cache/rebar3/bin"
 
 WORKDIR /usr/src/app
 COPY . /usr/src/app
@@ -8,7 +18,7 @@ RUN rebar3 as prod tar
 RUN mkdir -p /opt/rel
 RUN tar -zxvf /usr/src/app/_build/prod/rel/*/*.tar.gz -C /opt/rel
 
-FROM alpine:3.6
+FROM alpine:3.8
 
 RUN apk add --no-cache openssl-dev ncurses
 

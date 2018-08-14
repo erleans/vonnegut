@@ -14,7 +14,7 @@
          %% end internal
 
          produce/2, produce/3,
-         init/0,
+         init/1,
          setup/2,
          handle_request/2,
          handle_data/2,
@@ -260,8 +260,8 @@ topics(Pool, Topics) ->
             {error, Reason}
     end.
 
--spec init() -> {ok, term()}.
-init() ->
+-spec init(term()) -> {ok, term()}.
+init(_) ->
     {ok, #state{}}.
 
 -spec setup(inet:socket(), term()) -> {ok, term()} | {error, term(), term()}.
@@ -317,16 +317,12 @@ scall(_, _, _, _, _, 0) ->
     {error, pool_timeout};
 scall(Pool, RequestType, RequestData, RequestTimeout, Backoff, Retries) ->
     case shackle:call(Pool,  {RequestType, RequestData}, RequestTimeout) of
-        {error, no_socket} ->
-            {Time, Backoff1} = backoff:fail(Backoff),
-            timer:sleep(Time),
-            scall(Pool, RequestType, RequestData, RequestTimeout, Backoff1, Retries - 1);
-        {error, socket_closed} ->
-            {Time, Backoff1} = backoff:fail(Backoff),
-            timer:sleep(Time),
-            scall(Pool, RequestType, RequestData, RequestTimeout, Backoff1, Retries - 1);
         {error, timeout} ->
             {error, timeout};
+        {error, _} ->
+            {Time, Backoff1} = backoff:fail(Backoff),
+            timer:sleep(Time),
+            scall(Pool, RequestType, RequestData, RequestTimeout, Backoff1, Retries - 1);
         {ok, Response} ->
             {ok, vg_protocol:decode_response(RequestType, Response)}
     end.
