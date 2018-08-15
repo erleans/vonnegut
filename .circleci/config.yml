@@ -2,8 +2,7 @@ defaults: &defaults
   shell: /bin/bash
   working_directory: /home/circleci/vonnegut
   docker:
-    - image: tsloughter/erlang-alpine:20.1.4
-      cmd: ["/bin/bash"]
+    - image: tsloughter/erlang-alpine:21.0.5
 
 version: 2
 jobs:
@@ -46,7 +45,7 @@ jobs:
 
       - restore_cache:
           keys:
-            - erlang-plt-20.0.1
+            - erlang-plt-21.0.5
 
       - restore_cache:
           keys:
@@ -57,9 +56,9 @@ jobs:
           command: rebar3 dialyzer
 
       - save-cache:
-          key: erlang-plt-20.0.1
+          key: erlang-plt-21.0.5
           paths:
-            - /root/.cache/rebar3/rebar3_20.0.1_plt
+            - /root/.cache/rebar3/rebar3_21.0.5_plt
 
   xref:
     <<: *defaults
@@ -93,6 +92,7 @@ jobs:
       - run:
           command: |
             set -eux
+            epmd -daemon
             rebar3 do ct --name=testrunner@127.0.0.1, cover
             rebar3 covertool generate
             apk add --update python python-dev py-pip
@@ -104,6 +104,11 @@ jobs:
       - store_artifacts:
           path: /home/circleci/vonnegut/_build/test/logs
           destination: common_test
+
+      - store_artifacts:
+          path: /home/circleci/vonnegut/rebar3.crashdump
+          destination: rebar3_crashdump.txt
+          when: on_fail
 
 workflows:
   version: 2
