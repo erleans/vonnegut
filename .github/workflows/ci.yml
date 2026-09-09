@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: OTP 29 / ${{ matrix.check }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [compile, xref, dialyzer, eqwalizer, tests, release]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        id: beam
+        with:
+          version-file: .tool-versions
+          version-type: strict
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/rebar3
+            _build
+          key: ${{ runner.os }}-otp-${{ steps.beam.outputs.otp-version }}-rebar-${{ steps.beam.outputs.rebar3-version }}-${{ matrix.check }}-${{ hashFiles('rebar.config', 'rebar.lock') }}
+      - name: Compile
+        if: matrix.check == 'compile'
+        run: rebar3 compile
+      - name: Cross-reference checks
+        if: matrix.check == 'xref'
+        run: rebar3 xref
+      - name: Dialyzer
+        if: matrix.check == 'dialyzer'
+        run: rebar3 dialyzer
+      - name: Install ELP
+        if: matrix.check == 'eqwalizer'
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/WhatsApp/erlang-language-platform/releases/download/2026-08-10/elp-linux-x86_64-unknown-linux-gnu-otp-29.tar.gz \
+            --output "$RUNNER_TEMP/elp.tar.gz"
+          echo "711ea859b9c998eb990f9e647e03029c3aa1dfb61b177e6de5bf95c69b62695b  $RUNNER_TEMP/elp.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/elp"
+          tar -xzf "$RUNNER_TEMP/elp.tar.gz" -C "$RUNNER_TEMP/elp"
+          echo "$RUNNER_TEMP/elp" >> "$GITHUB_PATH"
+      - name: Eqwalizer
+        if: matrix.check == 'eqwalizer'
+        run: elp eqwalize-all --as default --bail-on-error --stats
+      - name: Common Test and coverage
+        if: matrix.check == 'tests'
+        run: |
+          ulimit -n 63536
+          epmd -daemon
+          rebar3 do ct --name=testrunner@127.0.0.1, cover
+          rebar3 covertool generate
+      - name: Build release
+        if: matrix.check == 'release'
+        run: rebar3 as prod tar
+      - name: Upload coverage
+        if: matrix.check == 'tests' && success()
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: _build/test/covertool/vonnegut.covertool.xml
+          disable_search: true
+      - name: Save test reports and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: otp-29-${{ matrix.check }}-reports
+          if-no-files-found: ignore
+          path: |
+            _build/test/logs
+            _build/test/cover
+            _build/test/covertool
+            rebar3.crashdump
+            erl_crash.dump

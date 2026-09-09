@@ -1,6 +1,8 @@
 %%
 -module(vg_log_segments).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -export([init_table/0,
          load_existing/2,
          load_all/2,
@@ -26,9 +28,11 @@
 -define(LOG_SEGMENT_GUARD(RecordId), [{is_integer, '$1'}, {'=<', '$1', RecordId}]).
 -define(LOG_SEGMENT_RETURN, ['$1']).
 
+-spec init_table() -> ets:table().
 init_table() ->
     ets:new(?SEGMENTS_TABLE, [bag, public, named_table, {read_concurrency, true}]).
 
+-spec load_existing(vg:topic(), vg:partition()) -> [integer()].
 load_existing(Topic, Partition) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     case filelib:wildcard(filename:join(TopicDir, "*.log")) of
@@ -38,6 +42,7 @@ load_existing(Topic, Partition) ->
             load_segments(Topic, Partition, LogSegments)
     end.
 
+-spec load_all(vg:topic(), vg:partition()) -> [integer()].
 load_all(Topic, Partition) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     case filelib:wildcard(filename:join(TopicDir, "*.log")) of
@@ -49,13 +54,15 @@ load_all(Topic, Partition) ->
             load_segments(Topic, Partition, LogSegments)
     end.
 
+-spec load_segments(vg:topic(), vg:partition(), [file:filename_all()]) -> [integer()].
 load_segments(Topic, Partition, LogSegments) ->
     [begin
-         SegmentId = list_to_integer(filename:basename(LogSegment, ".log")),
+         SegmentId = vg_utils:to_integer(filename:basename(LogSegment, ".log")),
          insert(Topic, Partition, SegmentId),
          SegmentId
      end || LogSegment <- LogSegments].
 
+-spec delete_segments(vg:topic(), vg:partition()) -> ok.
 delete_segments(Topic, Partition) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     AllFiles = filelib:wildcard(filename:join(TopicDir, "*")),
@@ -63,20 +70,23 @@ delete_segments(Topic, Partition) ->
     file:del_dir(TopicDir),
     ok.
 
+-spec delete_indexes(vg:topic(), vg:partition()) -> ok.
 delete_indexes(Topic, Partition) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     AllFiles = filelib:wildcard(filename:join(TopicDir, "*.index")),
     ok = lists:foreach(fun file:delete/1, AllFiles).
 
+-spec regenerate_indexes(vg:topic(), vg:partition()) -> ok.
 regenerate_indexes(Topic, Partition) ->
     TopicDir = vg_utils:topic_dir(Topic, Partition),
     AllFiles = filelib:wildcard(filename:join(TopicDir, "*.log")),
     ok = lists:foreach(fun regenerate_index/1, AllFiles).
 
+-spec regenerate_index(file:filename_all()) -> ok.
 regenerate_index(LogFilename) ->
     TopicDir = filename:dirname(LogFilename),
     StrID = filename:basename(LogFilename, ".log"),
-    ID = list_to_integer(StrID),
+    ID = vg_utils:to_integer(StrID),
     IndexFilename = vg_utils:index_file(TopicDir, ID),
     {ok, IndexFile} = vg_utils:open_append(IndexFilename),
     {ok, LogFile} = vg_utils:open_read(LogFilename),
@@ -86,6 +96,7 @@ regenerate_index(LogFilename) ->
     {ok, IndexInterval} = application:get_env(vonnegut, index_interval_bytes),
     regen(file:pread(LogFile, 0, ?OFFSET_AND_LENGTH_BYTES), 0, LogFile, ID, IndexFile, 99999999, IndexInterval).
 
+-spec regen(eof | {ok, binary() | string()} | {error, term()}, integer(), file:io_device(), integer(), file:io_device(), non_neg_integer(), pos_integer()) -> ok.
 regen(eof, _Location, Log, _ID, Index, _Bytes, _IndexInterval) ->
     file:close(Log),
     file:close(Index),
@@ -107,18 +118,21 @@ regen({ok, <<Offset:64/signed, Size:32/signed>>}, Location, Log, BaseOffset, Ind
     regen(file:pread(Log, NextLocation, ?OFFSET_AND_LENGTH_BYTES), NextLocation, Log, BaseOffset, Index, NewBytes,
           IndexInterval).
 
+-spec cleanup_segments_table(vg:topic(), vg:partition()) -> ok.
 cleanup_segments_table(Topic, Partition) ->
     NumDeleted = ets:select_delete(?SEGMENTS_TABLE,
                                    [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
                                      [],
                                      ?LOG_SEGMENT_RETURN}]),
-    lager:info("deleted ~p segments from the table", [NumDeleted]),
+    logger:info("deleted ~p segments from the table", [NumDeleted]),
     prometheus_gauge:dec(log_segments, [NumDeleted]).
 
+-spec insert(vg:topic(), vg:partition(), integer()) -> true.
 insert(Topic, Partition, SegmentId) ->
     prometheus_gauge:inc(log_segments, [Topic]),
     ets:insert(?SEGMENTS_TABLE, {Topic, Partition, SegmentId}).
 
+-spec local(vg:topic(), vg:partition()) -> boolean().
 local(Topic, Partition) ->
     case ets:select(?SEGMENTS_TABLE, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
                                        ?LOG_SEGMENT_GUARD(0),
@@ -137,7 +151,10 @@ find_log_segment(Topic, Partition, RecordId) ->
         [] ->
             %% load from disk and try again
             load_existing(Topic, Partition),
-            find_log_segment_(Topic, Partition, RecordId);
+            case find_log_segment_(Topic, Partition, RecordId) of
+                [] -> throw({topic_not_found, Topic, Partition});
+                SegmentId -> SegmentId
+            end;
         Match ->
             %% Return largest, being the largest log segment
             %% offset that is still less than the record offset
@@ -145,6 +162,7 @@ find_log_segment(Topic, Partition, RecordId) ->
     end.
 
 %% internal version that won't try again if no match found
+-spec find_log_segment_(vg:topic(), vg:partition(), integer()) -> integer() | [].
 find_log_segment_(Topic, Partition, RecordId) ->
     %% Find all registered log segments for topic-partition < the recordid we are looking for
     case ets:select(?SEGMENTS_TABLE, [{?LOG_SEGMENT_MATCH_PATTERN(Topic, Partition),
@@ -206,7 +224,7 @@ find_record_offset(Topic, Partition, SegmentId, RecordId) ->
 
             try
                 InitialOffset = vg_index:find_in_index(IndexSegmentFD, SegmentId, RecordId),
-                lager:info("InitialOffset topic=~p segment_id=~p initial_offset=~p", [Topic, SegmentId, InitialOffset]),
+                logger:info("InitialOffset topic=~p segment_id=~p initial_offset=~p", [Topic, SegmentId, InitialOffset]),
                 find_in_log(LogSegmentFD, RecordId, InitialOffset)
             after
                 file:close(LogSegmentFD),
@@ -218,13 +236,14 @@ find_record_offset(Topic, Partition, SegmentId, RecordId) ->
 
 %% Find the position in Log file of the start of a log with id Id
 -spec find_in_log(Log, Id, Position) -> {integer(), integer()} when
-      Log      :: file:fd(),
+      Log      :: file:io_device(),
       Id       :: integer(),
       Position :: integer().
 find_in_log(Log, Id, Position) ->
     {ok, _} = file:position(Log, Position),
     find_in_log(Log, Id, Position, 0, file:read(Log, ?OFFSET_AND_LENGTH_BYTES)).
 
+-spec find_in_log(file:io_device(), integer(), integer(), non_neg_integer(), eof | {ok, binary() | string()} | {error, term()}) -> {integer(), integer()}.
 find_in_log(_Log, Id, Position, LastSize, {ok, <<FileId:64/signed, _Size:32/signed>>}) when FileId > Id ->
     {Position, LastSize};
 find_in_log(_Log, Id, Position, LastSize, {ok, <<Id:64/signed, _Size:32/signed>>}) ->
@@ -250,6 +269,7 @@ find_in_log(Log, Id, Position, LastSize, {ok, <<FileId:64/signed, Size:32/signed
 find_in_log(_Log, _Id, Position, LastSize, _) ->
     {Position+LastSize, 0}.
 
+-spec find_latest_id(file:filename_all(), vg:topic(), vg:partition()) -> {integer(), file:filename_all(), file:filename_all()}.
 find_latest_id(TopicDir, Topic, Partition) ->
     SegmentId = vg_log_segments:find_active_segment(Topic, Partition),
     IndexFilename = vg_utils:index_file(TopicDir, SegmentId),
@@ -265,11 +285,12 @@ find_latest_id(TopicDir, Topic, Partition) ->
     end.
 
 %% Rolling log and index files, so open new empty ones for appending
+-spec new_index_log_files(file:filename_all(), integer()) -> {file:io_device(), file:io_device()}.
 new_index_log_files(TopicDir, Id) ->
     IndexFilename = vg_utils:index_file(TopicDir, Id),
     LogFilename = vg_utils:log_file(TopicDir, Id),
 
-    lager:debug("opening new log files: ~p ~p ~p", [Id, IndexFilename, LogFilename]),
+    logger:debug("opening new log files: ~p ~p ~p", [Id, IndexFilename, LogFilename]),
     %% Make sure empty?
     {ok, IndexFile} = vg_utils:open_append(IndexFilename),
     {ok, LogFile} = vg_utils:open_append(LogFilename),
@@ -277,6 +298,7 @@ new_index_log_files(TopicDir, Id) ->
 
 %% consider moving this to vg_index, but then we might need to figure
 %% out some other, cleaner way to do the create new case
+-spec last_in_index(file:filename_all(), file:filename_all(), integer()) -> {integer(), integer()}.
 last_in_index(TopicDir, IndexFilename, SegmentId) ->
     case file:open(IndexFilename, [read, binary]) of
         {error, enoent} when SegmentId =:= 0 ->
@@ -304,6 +326,7 @@ last_in_index(TopicDir, IndexFilename, SegmentId) ->
     end.
 
 %% Find the Id for the last log in the log file Log
+-spec find_last_log(file:io_device(), integer(), eof | {ok, binary() | string()} | {error, term()}) -> integer().
 find_last_log(Log, _, {ok, <<NewId:64/signed, Size:32/signed>>}) ->
     case file:read(Log, Size + ?OFFSET_AND_LENGTH_BYTES) of
         {ok, <<Batch:Size/bytes, Data:?OFFSET_AND_LENGTH_BYTES/bytes>>} ->

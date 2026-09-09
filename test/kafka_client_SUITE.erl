@@ -17,7 +17,7 @@ init_per_suite(Config) ->
     application:set_env(vonnegut, index_max_bytes, 18),
     application:set_env(vonnegut, index_interval_bytes, 24),
     application:set_env(vonnegut, chain, [{discovery, local}]),
-    crypto:start(),
+    application:ensure_all_started(crypto),
 
     Port = 5588,
     Host = <<"127.0.0.1">>,
@@ -26,7 +26,7 @@ init_per_suite(Config) ->
     application:ensure_all_started(vonnegut),
     application:ensure_all_started(brod),
 
-    ok = brod:start_client(Hosts, brod_client_1, []),
+    ok = brod:start_client(Hosts, brod_client_1, [{query_api_versions, false}]),
 
     [{host, Host}, {port, Port}, {hosts, Hosts} | Config].
 
@@ -44,12 +44,11 @@ get_metadata(Config) ->
     ok = vg:create_topic(Topic),
 
     %% same host will be in broker list twice because we send the same broker as the tail
-    {ok,
-     [{brokers,
-       [[{node_id,0},{host,Host},{port,Port}],
-        [{node_id,0},{host,Host},{port,Port}]]},
-      {topic_metadata, TMs}]} = brod:get_metadata(Hosts),
-    ?assert(lists:any(fun(TM) -> lists:member({topic,Topic}, TM) end, TMs)).
+    {ok, #{brokers := [#{node_id := 0, host := Host, port := Port},
+                        #{node_id := 0, host := Host, port := Port}],
+           topics := TMs}} =
+        brod:get_metadata(Hosts, all, [{query_api_versions, false}]),
+    ?assert(lists:any(fun(#{name := Name}) -> Name =:= Topic end, TMs)).
 
 produce(Config) ->
     Hosts = ?config(hosts, Config),

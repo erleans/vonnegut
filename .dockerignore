@@ -1,0 +1,7 @@
+_build
+data
+log
+logs
+properdata
+erl_crash.dump
+rebar3.crashdump

@@ -2,6 +2,8 @@
 %% TODO: turn into a one off proc that triggers when needed.
 -module(vg_topic_mgr).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -behaviour(gen_server).
 
 %% API
@@ -28,26 +30,26 @@
 %%% API
 %%%===================================================================
 
-%% need this until an Erlang release with `hibernate_after` spec added to gen option type
--dialyzer({nowarn_function, start_link/3}).
-
 -define(TOPIC_MGR(Topic, Partition), {via, gproc, {n, l, {mgr, Topic, Partition}}}).
 
+-spec start_link(vg:topic(), vg:partition(), node()) -> {ok, pid()} | {error, term()}.
 start_link(Topic, Partition, Next) ->
     case gen_server:start_link(?TOPIC_MGR(Topic, Partition), ?MODULE, [Topic, Partition, Next],
                                [{hibernate_after, timer:minutes(5)}]) of % hibernate after 5 minutes with no messages
         {ok, Pid} ->
             {ok, Pid};
-        {error, {already_started, Pid}} ->
+        {error, {already_started, Pid}} when is_pid(Pid) ->
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}
     end.
 
+-spec delete_topic(vg:topic(), vg:partition()) -> ok | {error, term()}.
 delete_topic(Topic, Partition) ->
     %% may need to start the topic if this fails?
     gen_server:call(?TOPIC_MGR(Topic, Partition), delete_topic, timer:seconds(45)).
 
+-spec regenerate_index(vg:topic(), vg:partition()) -> ok.
 regenerate_index(Topic, Partition) ->
     %% may need to start the topic if this fails?
     gen_server:call(?TOPIC_MGR(Topic, Partition), regenerate_index, timer:minutes(15)).
@@ -56,18 +58,20 @@ regenerate_index(Topic, Partition) ->
 %%% gen_server callbacks
 %%%===================================================================
 
-init([Topic, Partition, Next]) ->
+-spec init([vg:topic() | vg:partition() | node()]) -> {ok, #state{}}.
+init([Topic, Partition, Next]) when is_binary(Topic), is_integer(Partition), is_atom(Next) ->
     {ok, #state{topic = Topic,
                 partition = Partition,
                 next = Next}}.
 
+-spec handle_call(term(), gen_server:from(), #state{}) -> {reply, ok, #state{}} | {noreply, #state{}}.
 handle_call(delete_topic, _From, #state{topic = Topic, next = Next,
                                         partition = Partition} = State) ->
     %% halt the active segment
-    lager:info("halting active segment"),
+    logger:info("halting active segment"),
     halted = vg_active_segment:halt(Topic, Partition),
     %% delete the segments
-    lager:info("deleting segments"),
+    logger:info("deleting segments"),
     ok = vg_log_segments:delete_segments(Topic, Partition),
     %% remove HWM
     true = vg_topics:delete_hwm(Topic, Partition),
@@ -77,7 +81,7 @@ handle_call(delete_topic, _From, #state{topic = Topic, next = Next,
     case Next of
         tail -> ok;
         _ ->
-            lager:info("propagating delete"),
+            logger:info("propagating delete"),
             ok = vg_client:delete_topic(next_brick, Topic)
     end,
     {reply, ok, State};
@@ -95,20 +99,24 @@ handle_call(regenerate_index, _From, #state{topic = Topic,
     ok = vg_active_segment:resume_indexing(Topic, Partition),
     {reply, ok, State};
 handle_call(_Request, _From, State) ->
-    lager:warning("unexpected call ~p from ~p", [_Request, _From]),
+    logger:warning("unexpected call ~p from ~p", [_Request, _From]),
     {noreply, State}.
 
+-spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
 handle_cast(_Msg, State) ->
-    lager:warning("unexpected cast ~p", [_Msg]),
+    logger:warning("unexpected cast ~p", [_Msg]),
     {noreply, State}.
 
+-spec handle_info(term(), #state{}) -> {noreply, #state{}}.
 handle_info(_Info, State) ->
-    lager:warning("unexpected message ~p", [_Info]),
+    logger:warning("unexpected message ~p", [_Info]),
     {noreply, State}.
 
+-spec terminate(term(), #state{}) -> ok.
 terminate(_Reason, _State) ->
     ok.
 
+-spec code_change(term(), #state{}, term()) -> {ok, #state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 

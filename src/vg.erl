@@ -1,5 +1,7 @@
 -module(vg).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 %% client interface
 -export([ensure_topic/1,
          write_record_batch/3,
@@ -21,24 +23,35 @@
 -include("vg.hrl").
 
 -type topic() :: binary().
-
--type record() :: #{offset => integer(),
-                    timestamp => integer(),
-                    key => binary(),
-                    value := binary(),
-                    headers => [{unicode:characters_binary(), binary()}]}.
-
+-type partition() :: non_neg_integer().
+-type log_record() :: #{offset => integer(),
+                        sequence_number => integer(),
+                        timestamp => integer(),
+                        key => binary(),
+                        value := binary(),
+                        headers => [{binary(), binary()}]}.
+%% Input records, encoded batches, and fetched records have distinct shapes.
+-type records() :: binary() | [binary() | log_record()].
+-type batch_input() :: records() | #{producer_id => integer(),
+                                    producer_epoch => integer(),
+                                    sequence_number => integer(),
+                                    records := records()}.
 -type record_batch() :: #{crc := integer(),
-                          producer_id => integer(),
-                          producer_epoch => integer(),
-                          sequence_number => integer(),
-                          records := [record()]}.
+                          last_offset_delta := integer(),
+                          size := non_neg_integer(),
+                          record_batch := iodata(),
+                          base_offset => integer()}.
+-type fetch_result() :: #{high_water_mark := integer(),
+                          partition := partition(),
+                          record_batches := [log_record()]}.
+-type file_chunk() :: {file:filename_all(), non_neg_integer(), non_neg_integer()}.
+-type tail_options() :: #{records => pos_integer(), time => pos_integer()}.
+-type topic_error() :: invalid_characters | non_binary_topic.
 
--export_types([topic/0,
-               record/0,
-               record_batch/0]).
+-export_type([topic/0, partition/0, log_record/0, records/0, batch_input/0,
+              record_batch/0, fetch_result/0, file_chunk/0, tail_options/0]).
 
--spec create_topic(Topic :: topic()) -> ok.
+-spec create_topic(topic()) -> ok | {error, topic_error()}.
 create_topic(Topic) ->
     case validate_topic(Topic) of
         ok ->
@@ -48,7 +61,7 @@ create_topic(Topic) ->
             {error, Reason}
     end.
 
--spec ensure_topic(Topic :: topic()) -> ok.
+-spec ensure_topic(topic()) -> ok | {error, topic_error()}.
 ensure_topic(Topic) ->
     case validate_topic(Topic) of
         ok ->
@@ -58,6 +71,7 @@ ensure_topic(Topic) ->
             {error, Reason}
     end.
 
+-spec validate_topic(term()) -> ok | {error, topic_error()}.
 validate_topic(B) when is_binary(B) ->
     Disallowed =
         [
@@ -79,41 +93,34 @@ validate_topic(B) when is_binary(B) ->
 validate_topic(_) ->
     {error, non_binary_topic}.
 
--spec write_record_batch(Topic, Partition, RecordBatch) -> {ok, integer()} | {error, any()} when
-      Topic :: topic(),
-      Partition :: non_neg_integer(),
-      RecordBatch :: vg:record_batch().
+-spec write_record_batch(topic(), partition(), record_batch() | [record_batch()]) -> vg_active_segment:write_result().
 write_record_batch(Topic, Partition, RecordBatch) ->
     vg_active_segment:write(Topic, Partition, RecordBatch).
 
--spec write(Topic, Partition, Records) -> ok | {error, any()} when
-      Topic :: topic(),
-      Partition :: non_neg_integer(),
-      Records :: binary() | [binary()].
+-spec write(topic(), partition(), batch_input()) -> vg_active_segment:write_result().
 write(Topic, Partition, Records) ->
     RecordBatch = vg_protocol:encode_record_batch(Records),
     vg_active_segment:write(Topic, Partition, RecordBatch).
 
+-spec write(topic(), partition(), integer() | head, record_batch() | [record_batch()]) -> vg_active_segment:write_result().
 write(Topic, Partition, ExpectedId, RecordBatch) ->
     vg_active_segment:write(Topic, Partition, ExpectedId, RecordBatch).
 
+-spec fetch(topic()) -> {ok, fetch_result()}.
 fetch(Topic) ->
     fetch(Topic, 0).
 
--spec fetch(Topic, Offset) -> {ok, RecordBatches} when
-      Topic :: topic(),
-      Offset :: integer(),
-      RecordBatches :: #{high_water_mark := integer(),
-                         partition := 0,
-                         record_batches := [vg:record_batch()]}.
+-spec fetch(topic(), integer()) -> {ok, fetch_result()}.
 fetch(Topic, Offset) ->
     fetch(Topic, 0, Offset, -1).
 
+-spec fetch(topic(), partition(), integer(), integer()) -> {ok, fetch_result()}.
 fetch(Topic, Partition, Offset, Count) ->
     {_, _, {File, Position, Bytes}} = fetch(Topic, Partition, Offset, 0, Count),
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
         {ok, [Data]} = file:pread(Fd, [{Position, Bytes}]),
+        true = is_binary(Data) orelse Data =:= eof,
         {ok, #{high_water_mark => vg_topics:lookup_hwm(Topic, Partition),
                partition => Partition,
                record_batches => vg_protocol:decode_record_batches(Data)}}
@@ -126,6 +133,7 @@ fetch(Topic, Partition, Offset, Count) ->
 
 %% A fetch of offset -1 returns Limit number of the records up to the
 %% high watermark
+-spec fetch(topic(), partition(), integer(), non_neg_integer(), integer()) -> {non_neg_integer(), iodata(), file_chunk()}.
 fetch(Topic, Partition, -1, MaxBytes, Limit) ->
     HWM = vg_topics:lookup_hwm(Topic, Partition),
     fetch(Topic, Partition, erlang:max(0, HWM - Limit + 1), MaxBytes, Limit);
@@ -156,7 +164,7 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
                 end
         end,
 
-    lager:info("at=fetch_request topic=~s partition=~p offset=~p segment_id=~p position=~p",
+    logger:info("at=fetch_request topic=~s partition=~p offset=~p segment_id=~p position=~p",
                [Topic, Partition, Offset, SegmentId, Position]),
 
     Bytes =
@@ -167,19 +175,22 @@ fetch(Topic, Partition, Offset, MaxBytes, Limit) ->
     ErrorCode = 0,
     HWM = vg_topics:lookup_hwm(Topic, Partition),
     Response = vg_protocol:encode_fetch_topic_response(Partition, ErrorCode, HWM, Bytes),
-    lager:debug("sending hwm=~p bytes=~p", [HWM, Bytes]),
+    logger:debug("sending hwm=~p bytes=~p", [HWM, Bytes]),
     {erlang:iolist_size(Response)+Bytes, Response, {File, Position, Bytes}}.
 
 %% these are here mostly for ergonomics.  right now they just forward
 %% the work to the cluster manager, but we might need to change that
 %% later and this allows us to keep a easy to type interface that
 %% doesn't have to change.
+-spec delete_topic(topic()) -> ok | {error, term()}.
 delete_topic(Topic) ->
     vg_cluster_mgr:delete_topic(Topic).
 
+-spec describe_topic(topic()) -> no_return().
 describe_topic(Topic) ->
     vg_cluster_mgr:describe_topic(Topic).
 
+-spec deactivate_topic(topic()) -> [ok | {node(), topic(), [ok | {error, term()}]}] | {error, not_found}.
 deactivate_topic(Topic) ->
     vg_cluster_mgr:deactivate_topic(Topic).
 
@@ -188,25 +199,28 @@ deactivate_topic(Topic) ->
 %% ultra-rare), this is the right thing, but wrt index corruption
 %% (which should also be super rare?), we might want the fine control
 %% of regenerating a particular segment's index alone.
+-spec regenerate_topic_index(topic()) -> ok.
 regenerate_topic_index(Topic) ->
     vg_topic_mgr:regenerate_index(Topic, 0).
 
+-spec tail_topic(topic()) -> ok.
 tail_topic(Topic) ->
     tail_topic(Topic, #{}).
 
--spec tail_topic(binary(), Opts) -> ok when
-      Opts :: #{records => pos_integer(), % default 10 records
-                time => pos_integer()}.   % default 30 seconds
+-spec tail_topic(topic(), tail_options()) -> ok.
 tail_topic(Topic, Opts) ->
     Printer = erlang:spawn_opt(fun() -> tail_printer(Topic, Opts) end,
                                [{max_heap_size, 1024 * 1024}]),
+    true = is_pid(Printer),
     vg_active_segment:tail(Topic, 0, Printer).
 
 %% this is shaping up to be quite expensive and could block lazy
 %% starts of deactivated topics.  use in production with caution.
+-spec running_topics() -> [{topic(), partition()}].
 running_topics() ->
     vg_cluster_mgr:running_topics().
 
+-spec tail_printer(topic(), tail_options()) -> ok.
 tail_printer(Topic, Opts) ->
     Records = maps:get(records, Opts, 10),
     Time = maps:get(time, Opts, timer:seconds(30)),

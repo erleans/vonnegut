@@ -18,7 +18,7 @@ init_per_testcase(regenerate_index_test, Config) ->
     application:set_env(vonnegut, index_interval_bytes, 24),
     application:set_env(vonnegut, chain, [{discovery, local}]),
     application:ensure_all_started(vonnegut),
-    crypto:start(),
+    application:ensure_all_started(crypto),
     Config;
 init_per_testcase(_, Config) ->
     PrivDir = ?config(priv_dir, Config),
@@ -29,7 +29,7 @@ init_per_testcase(_, Config) ->
     application:set_env(vonnegut, index_interval_bytes, 24),
     application:set_env(vonnegut, chain, [{discovery, local}]),
     application:ensure_all_started(vonnegut),
-    crypto:start(),
+    application:ensure_all_started(crypto),
     Config.
 
 end_per_testcase(_, Config) ->

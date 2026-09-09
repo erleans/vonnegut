@@ -3,17 +3,16 @@
 %% Position is the offset in [offset].log to find the log Id
 -module(vg_index).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -include("vg.hrl").
 
 -export([find_in_index/3]).
 
--spec find_in_index(Fd, BaseOffset, Id) -> integer() | not_found when
-      Fd         :: file:fd(),
-      BaseOffset :: integer(),
-      Id         :: integer().
+-spec find_in_index(file:io_device(), integer(), integer()) -> non_neg_integer().
 find_in_index(Fd, BaseOffset, Id) ->
     case file:read(Fd, (2 * ?INDEX_ENTRY_SIZE)) of
-        {ok, Bytes} ->
+        {ok, Bytes} when is_binary(Bytes) ->
             find_in_index_(Fd, Id, BaseOffset, Bytes);
         _ ->
             0
@@ -21,6 +20,7 @@ find_in_index(Fd, BaseOffset, Id) ->
 
 %% Optimize later. Could keep entire index in memory
 %% and could (in memory or not) use a binary search
+-spec find_in_index_(file:io_device(), integer(), integer(), binary()) -> non_neg_integer().
 find_in_index_(_, _, _, <<>>) ->
     0;
 %% special case for when below the first offset in a single entry index
@@ -52,7 +52,7 @@ find_in_index_(_, Id, BaseOffset, <<_Offset:?INDEX_OFFSET_BITS/unsigned,
 find_in_index_(Fd, Id, BaseOffset, <<_Offset:?INDEX_OFFSET_BITS/unsigned,
                                      _Pos:?INDEX_POS_BITS/unsigned, Rest/binary>>) ->
     case file:read(Fd, ?INDEX_ENTRY_SIZE) of
-        {ok, Bytes} ->
+        {ok, Bytes} when is_binary(Bytes) ->
             find_in_index_(Fd, Id, BaseOffset, <<Rest/binary, Bytes/binary>>);
         _ ->
             find_in_index_(Fd, Id, BaseOffset, Rest)

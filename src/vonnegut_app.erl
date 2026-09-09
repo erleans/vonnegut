@@ -5,23 +5,29 @@
 
 -module(vonnegut_app).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -behaviour(application).
 
 %% Application callbacks
 -export([start/2,
-         stop/1,
-         swap_lager/1]).
+         stop/1]).
 
 %%====================================================================
 %% API
 %%====================================================================
 
+-spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
     init_tables(),
-    vonnegut_sup:start_link().
+    case vonnegut_sup:start_link() of
+        {ok, Pid} -> {ok, Pid};
+        {error, Reason} -> {error, Reason}
+    end.
 
 
 %%--------------------------------------------------------------------
+-spec stop(term()) -> ok.
 stop(_State) ->
     ok.
 
@@ -29,27 +35,8 @@ stop(_State) ->
 %% Internal functions
 %%====================================================================
 
+-spec init_tables() -> ets:table().
 init_tables() ->
     vg_log_segments:init_table(),
     vg_topics:init_table().
 
-%% TODO: ifdef this out in non-test builds
-swap_lager(Pid) ->
-    %% our testing environment has provided us with a remote
-    %% lager sink to target messages at, but we can't target
-    %% it directly, so proxy message through to it.
-    Proxy = spawn(fun Loop() ->
-                          receive
-                              E -> Pid ! E
-                          end,
-                          Loop()
-                  end),
-    Lager = whereis(lager_event),
-    true = unregister(lager_event),
-    case (catch register(lager_event, Proxy)) of
-        true ->
-            lager:info("swapped local lager_event server with: ~p", [Pid]);
-        Other ->
-            register(lager_event, Lager),
-            lager:info("noes we failed: ~p", [Other])
-    end.

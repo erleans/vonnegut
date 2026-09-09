@@ -1,5 +1,7 @@
 -module(vg_client_pool).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -export([start/0, start/1,
          stop/0,
          restart/0,
@@ -10,16 +12,25 @@
 
 -include("vg.hrl").
 
+-type pool_options() :: #{ip => string() | inet:ip_address(),
+                          port => inet:port_number(), reconnect => boolean()}.
+-type access_mode() :: read | write.
+-type lookup_entry() :: {vg_protocol:chain_boundary(), vg_protocol:chain_boundary(), atom(), atom()}.
+-export_type([pool_options/0, access_mode/0]).
+
 -define(OPTIONS, [set, public, named_table, {read_concurrency, true}]).
 
+-spec start() -> ok | {error, term()}.
 start() ->
     start(#{}).
 
+-spec start(pool_options()) -> ok | {error, term()}.
 start(Opts) ->
     %% so restarts won't lose settings
     application:set_env(vonnegut, global_pool_opts, Opts),
     start(Opts, 0).
 
+-spec start(pool_options(), non_neg_integer()) -> ok | {error, term()}.
 start(_Opts, 10) ->
     {error, could_not_start_pools};
 start(Opts, N) ->
@@ -29,19 +40,20 @@ start(Opts, N) ->
         {ok, ClientConfig} ->
             case proplists:get_value(endpoints, ClientConfig) of
                 undefined ->
-                    lager:error("No endpoints configured for client");
+                    logger:error("No endpoints configured for client");
                 [{Host, Port} | _] when is_integer(Port) ->
                     start_(Opts, N, Host, Port);
                 [HostPort | _] when is_list(HostPort) ->
                     case parse_host_port(HostPort) of
                         {ok, Host, Port} -> start_(Opts, N, Host, Port);
-                        {error, _} -> lager:error("Invalid endpoint ~p", HostPort)
+                        {error, _} -> logger:error("Invalid endpoint ~p", HostPort)
                     end
             end;
         _ ->
-            lager:info("No client configuration")
+            logger:info("No client configuration")
     end.
 
+-spec start_(pool_options(), non_neg_integer(), string(), inet:port_number()) -> ok | {error, term()}.
 start_(Opts, N, Host, Port) ->
   start_pool(metadata, Opts#{ip => Host,
                              port => Port}),
@@ -56,11 +68,12 @@ start_(Opts, N, Host, Port) ->
       end
   catch
       ?WITH_STACKTRACE(_, R, S)
-          lager:warning("at=start_pools error=~p stacktrace=~p", [R, S]),
+          logger:warning("at=start_pools error=~p stacktrace=~p", [R, S]),
           timer:sleep(500),
           start(Opts, N + 1)
   end.
 
+-spec parse_host_port(string()) -> {ok, string(), integer()} | {error, invalid_host_port_string}.
 parse_host_port(HostPortString) ->
     case string:split(HostPortString, ":", all) of
         [Host] ->
@@ -74,10 +87,11 @@ parse_host_port(HostPortString) ->
             {error, invalid_host_port_string}
     end.
   
+-spec start_pools([vg_protocol:wire_chain()]) -> [ok | {error, term()}].
 start_pools(Chains) ->
     [begin
          Name = <<HeadHost/binary, "-", (integer_to_binary(HeadPort))/binary>>,
-         lager:info("starting chain: ~p ~p", [Name, C]),
+         logger:info("starting chain: ~p ~p", [Name, C]),
          HeadName = make_pool_name(Name, write),
          start_pool(HeadName, #{ip => binary_to_list(HeadHost),
                                 port => HeadPort}),
@@ -96,6 +110,7 @@ start_pools(Chains) ->
           head := {HeadHost, HeadPort},
           tail := {TailHost0, TailPort}} = C <- Chains].
 
+-spec refresh_topic_map() -> true.
 refresh_topic_map() ->
     %% TODO live migrate pools when the chain list changes?
     %% or just restart the whole mess?
@@ -104,6 +119,7 @@ refresh_topic_map() ->
     ets:insert(?topic_map, {chains, Chains}),
     ets:insert(?topic_map, {lookup, lookup_list(Chains)}).
 
+-spec lookup_list([vg_protocol:wire_chain()]) -> [lookup_entry()].
 lookup_list(Chains) ->
     [begin
          Name = <<HeadHost/binary, "-", (integer_to_binary(HeadPort))/binary>>,
@@ -115,6 +131,7 @@ lookup_list(Chains) ->
           topics_end := End,
           head := {HeadHost, HeadPort}} <- Chains].
 
+-spec get_pool(vg:topic(), access_mode()) -> {ok, atom()} | {error, malformed_chain}.
 get_pool(Topic, RW) ->
     %% at some point we should handle retries here for when the topic
     %% list is being refreshed.
@@ -125,7 +142,7 @@ get_pool(Topic, RW) ->
         [{_, Chains}] ->
             case find_chain(Chains, Topic, RW) of
                 {ok, Pool} ->
-                    lager:debug("found chain for topic=~p on pool=~p", [Topic, Pool]),
+                    logger:debug("found chain for topic=~p on pool=~p", [Topic, Pool]),
                     {ok, Pool};
                 {error, Reason} ->
                     {error, Reason}
@@ -133,6 +150,7 @@ get_pool(Topic, RW) ->
     end.
 
 %% TODO: work out how to replace this with a select, maybe
+-spec find_chain([lookup_entry()], vg:topic(), access_mode()) -> {ok, atom()} | {error, malformed_chain}.
 find_chain([], _Topic, _RW) ->
     {error, malformed_chain};
 find_chain([{start_space, end_space, HeadName, TailName} | _Tail], _Topic, RW)  ->
@@ -146,20 +164,24 @@ find_chain([{S, E, HeadName, TailName} | _Tail], Topic, RW) when Topic >= S anda
 find_chain([_|Tail], Topic, RW) ->
     find_chain(Tail, Topic, RW).
 
+-spec pick_pool(atom(), atom(), access_mode()) -> atom().
 pick_pool(Head, _Tail, write) ->
     Head;
 pick_pool(_Head, Tail, read) ->
     Tail.
 
+-spec make_pool_name(binary(), access_mode()) -> atom().
 make_pool_name(Chain, read) ->
     binary_to_atom(<<Chain/binary, "_tail">>, utf8);
 make_pool_name(Chain, write) ->
     binary_to_atom(<<Chain/binary, "_head">>, utf8).
 
+-spec maybe_init_ets() -> ets:table() | ok.
 maybe_init_ets() ->
     maybe_init_ets(foo).
 
 %% eventually handle the clean argument
+-spec maybe_init_ets(term()) -> ets:table() | ok.
 maybe_init_ets(_) ->
     case ets:info(?topic_map, name) of
         undefined ->
@@ -168,6 +190,7 @@ maybe_init_ets(_) ->
             ok
     end.
 
+-spec start_pool(atom(), pool_options()) -> ok | {error, term()}.
 start_pool(Name, Opts) ->
     ClientPoolSize = application:get_env(vonnegut, client_pool_size, 10),
     SocketOpts = [binary,
@@ -189,11 +212,13 @@ start_pool(Name, Opts) ->
                         {pool_size, ClientPoolSize},
                         {pool_strategy, round_robin}]).
 
+-spec stop() -> ok | {error, term()}.
 stop() ->
     [shackle_pool:stop(Pool)
      || Pool <- application:get_env(vonnegut, client_pools, [])],
     application:stop(shackle).
 
+-spec restart() -> ok | {error, term()}.
 restart() ->
     stop(),
     Opts = application:get_env(vonnegut, global_pool_opts, #{}),

@@ -7,8 +7,6 @@
 prop_test() ->
     ?FORALL(Cmds, more_commands(8, commands(?MODEL)),
             begin
-                lager:start(),
-                lager:set_loglevel(lager_console_backend, error),
                 application:ensure_all_started(vonnegut),
                 {History, State, Result} = run_commands(?MODEL, Cmds),
                 application:stop(vonnegut),

@@ -18,12 +18,7 @@
     partisan,
     elli,
     elli_prometheus,
-    prometheus,
-
-    hackney,
-    jsx,
-    oc_google_reporter,
-    opencensus
+    prometheus
    ]},
   {env,[{log_dirs, ["./data"]},
         {acceptor_pool_size, 10},

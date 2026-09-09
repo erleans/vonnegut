@@ -8,6 +8,8 @@
 %%%-------------------------------------------------------------------
 -module(vg_cluster_mgr).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -behaviour(gen_server).
 
 %% API
@@ -29,24 +31,25 @@
 
 -include("vg.hrl").
 
--type chain_id() :: binary().
+-type request() :: get_map | running_topics |
+                   {create_topic | ensure_topic | delete_topic | deactivate_topic, vg:topic()}.
+-type chain_id() :: binary() | atom().
 -type topics_map() :: #{vg:topic() => chain_id()}.
 -type chains_map() :: #{chain_id() => chain()}.
 
--export_types([topic/0,
-               chain_id/0,
+-export_type([chain_id/0,
                topics_map/0,
                chains_map/0]).
 
 -define(SERVER, ?MODULE).
 
--record(state, {topics = #{} :: maps:map(),
-                chains = #{} :: maps:map(),
+-record(state, {topics = #{} :: topics_map(),
+                chains = #{} :: chains_map(),
                 epoch        :: integer()}).
 
--spec start_link(vg_chain_state:chain_name(), [vg_chain_state:chain_node()], file:filename_all()) -> {ok, pid()}.
+-spec start_link(vg_chain_state:chain_name(), [vg_chain_state:chain_node()], file:filename_all()) -> gen_server:start_ret().
 start_link(ChainName, ChainNodes, DataDir) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [ChainName, ChainNodes, DataDir], []).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, {ChainName, ChainNodes, DataDir}, []).
 
 %% add chain functionality needed
 
@@ -67,30 +70,36 @@ ensure_topic(Topic) ->
     HeadNode = vg_chain_state:head(),
     gen_server:call({?SERVER, HeadNode}, {ensure_topic, Topic}).
 
+-spec delete_topic(vg:topic()) -> ok | {error, term()}.
 delete_topic(Topic) ->
     HeadNode = vg_chain_state:head(),
     gen_server:call({?SERVER, HeadNode}, {delete_topic, Topic}, infinity).
 
+-spec describe_topic(vg:topic()) -> no_return().
 describe_topic(Topic) ->
     HeadNode = vg_chain_state:head(),
     gen_server:call({?SERVER, HeadNode}, {describe_topic, Topic}).
 
+-spec deactivate_topic(vg:topic()) -> [ok | {node(), vg:topic(), [ok | {error, term()}]}] | {error, not_found}.
 deactivate_topic(Topic) ->
     HeadNode = vg_chain_state:head(),
     gen_server:call({?SERVER, HeadNode}, {deactivate_topic, Topic}).
 
+-spec running_topics() -> [{vg:topic(), vg:partition()}].
 running_topics() ->
     HeadNode = vg_chain_state:head(),
     gen_server:call({?SERVER, HeadNode}, running_topics).
 
 %%%%%%%%%%%%%%%%%%%%%%%%
 
-init([ChainName, ChainNodes, DataDir]) ->
+-spec init({vg_chain_state:chain_name(), [vg_chain_state:chain_node()], file:filename_all()}) -> {ok, #state{}}.
+init({ChainName, ChainNodes, DataDir}) ->
     Chain = create_chain(ChainName, ChainNodes),
     State = load_state([Chain], DataDir),
     self() ! {ensure_topics, ChainName},
     {ok, State}.
 
+-spec handle_call(request(), gen_server:from(), #state{}) -> {reply, term(), #state{}} | {noreply, #state{}}.
 handle_call(get_map, _From, State=#state{topics=Topics,
                                          chains=Chains,
                                          epoch=Epoch}) ->
@@ -112,7 +121,7 @@ handle_call({create_topic, Topic}, _From, State=#state{topics=Topics,
             {reply, {ok, Chain}, State#state{topics=Topics1,
                                              epoch=Epoch+1}};
         Chain ->
-            lager:info("attempting to create topic that already exists on chain=~p", [Chain]),
+            logger:info("attempting to create topic that already exists on chain=~p", [Chain]),
             {reply, {error, exists}, State}
     end;
 handle_call({ensure_topic, Topic}, _From, State=#state{topics=Topics,
@@ -174,16 +183,20 @@ handle_call(running_topics, _From, State=#state{chains=_Chains}) ->
 handle_call(_, _, State) ->
     {noreply, State}.
 
+-spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+-spec handle_info({ensure_topics, chain_id()}, #state{}) -> {noreply, #state{}}.
 handle_info({ensure_topics, ChainName}, State) ->
     State1 = ensure_all_topics(ChainName, State),
     {noreply, State1}.
 
+-spec terminate(term(), #state{}) -> ok.
 terminate(_Reason, _State) ->
     ok.
 
+-spec code_change(term(), #state{}, term()) -> {ok, #state{}}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -191,6 +204,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+-spec start_on_all_nodes(vg:topic(), chain_id(), chains_map()) -> [ok].
 start_on_all_nodes(Topic, Chain, Chains) ->
     #chain{nodes=Nodes} = maps:get(Chain, Chains),
     [case vg_topics_sup:start_child(Node, Topic, [0]) of
@@ -199,6 +213,7 @@ start_on_all_nodes(Topic, Chain, Chains) ->
          {error, Reason} -> exit({error, Reason})
      end || Node <- Nodes].
 
+-spec stop_on_all_nodes(vg:topic(), chain_id(), chains_map()) -> [ok | {node(), vg:topic(), [ok | {error, term()}]}].
 stop_on_all_nodes(Topic, Chain, Chains) ->
     #chain{nodes=Nodes} = maps:get(Chain, Chains),
     %% usort here to remove useless oks
@@ -210,6 +225,7 @@ stop_on_all_nodes(Topic, Chain, Chains) ->
        end || Node <- Nodes]).
 
 %% TODO: the topic space stuff MUST be fixed before multiple chains are supported
+-spec create_chain(chain_id(), [vg_chain_state:chain_node()]) -> chain().
 create_chain(Name, []) ->
     #chain{name  = Name,
            nodes = [node()],
@@ -225,9 +241,11 @@ create_chain(Name, Nodes) ->
            head  = head(Nodes),
            tail  = tail(Nodes)}.
 
+-spec nodename(vg_chain_state:chain_node()) -> node().
 nodename({Name, Host, _, _}) ->
     list_to_atom(atom_to_list(Name) ++ "@" ++ Host).
 
+-spec load_state([chain()], file:filename_all()) -> #state{}.
 load_state(Chains, _DataDir) ->
     ChainsMap = lists:foldl(fun(Chain=#chain{name=Name}, Acc) ->
                                 maps:put(Name, Chain, Acc)
@@ -236,12 +254,15 @@ load_state(Chains, _DataDir) ->
            chains = ChainsMap,
            epoch = 0}.
 
+-spec head([vg_chain_state:chain_node()]) -> {string(), inet:port_number()}.
 head([{_, Host, _, ClientPort} | _]) ->
     {Host, ClientPort}.
 
+-spec tail([vg_chain_state:chain_node()]) -> {string(), inet:port_number()}.
 tail(Nodes) ->
     head(lists:reverse(Nodes)).
 
+-spec ensure_all_topics(chain_id(), #state{}) -> #state{}.
 ensure_all_topics(ChainName, State) ->
     Topics = vg_utils:topics_on_disk(),
     lists:foldl(fun({Topic, _}, StateAcc=#state{topics=TopicsAcc,

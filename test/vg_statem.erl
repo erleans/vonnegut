@@ -10,7 +10,7 @@
 
 -record(state,
         {
-          topics = #{}
+          topics = #{} :: #{vg:topic() => integer()}
         }).
 
 command(_S = #state{topics = Topics}) ->
@@ -54,7 +54,6 @@ precondition(#state{topics = T}, {call, _Mod, Fun, _Args}) when T == #{}
                                                                           Fun == produce) ->
     false;
 precondition(#state{}, _C = {call, _Mod, _Fun, _Args}) ->
-    %lager:info("calling ~p", [_C]),
     true.
 
 %% Given the state `State' *prior* to the call `{call, Mod, Fun, Args}',
@@ -66,7 +65,6 @@ postcondition(#state{topics = Topics}, {call, vg_client, fetch, [Topic, Index]},
     %% potentially validate what we're seeing here, also this will stop being true once more bytes start being returned
     length(RecordSet) =:= (HWM - Index) + 1;
 postcondition(#state{topics = Topics}, {call, vg_client, produce, [Topic, Message]}, Res) ->
-    lager:info("check ~p ~p ~p", [Topic, Res, Topics]),
     HWM = maps:get(Topic, Topics),
     {ok, Offset} = Res,
     %% potentially validate what we're seeing here

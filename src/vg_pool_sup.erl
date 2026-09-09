@@ -1,5 +1,7 @@
 -module(vg_pool_sup).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -behaviour(supervisor).
 
 %% public api
@@ -12,11 +14,13 @@
 
 %% public api
 
+-spec start_link(vg_chain_state:role()) -> supervisor:startlink_ret().
 start_link(Role) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, [Role]).
 
 %% supervisor api
 
+-spec init([vg_chain_state:role()]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([Role]) ->
     Flags = #{strategy => rest_for_one},
     Pool = #{id => vg_pool,

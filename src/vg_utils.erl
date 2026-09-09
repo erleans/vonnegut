@@ -1,5 +1,7 @@
 -module(vg_utils).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -export([index_file/2,
          index_file/3,
          log_file/2,
@@ -14,24 +16,30 @@
          to_integer/1]).
 
 %% Convenience functions for creating index and log file names
+-spec index_file(file:filename_all(), integer()) -> file:filename_all().
 index_file(TopicDir, Id) ->
     filename:join(TopicDir, io_lib:format("~20.10.0b.index", [Id])).
 
+-spec index_file(vg:topic(), vg:partition(), integer()) -> file:filename_all().
 index_file(Topic, Partition, Id) ->
     TopicDir = topic_dir(Topic, Partition),
     filename:join(TopicDir, io_lib:format("~20.10.0b.index", [Id])).
 
+-spec log_file(vg:topic(), vg:partition(), integer()) -> file:filename_all().
 log_file(Topic, Partition, Id) ->
     TopicDir = topic_dir(Topic, Partition),
     filename:join(TopicDir, io_lib:format("~20.10.0b.log", [Id])).
 
+-spec log_file(file:filename_all(), integer()) -> file:filename_all().
 log_file(TopicDir, Id) ->
     filename:join(TopicDir, io_lib:format("~20.10.0b.log", [Id])).
 
+-spec topic_dir(vg:topic(), vg:partition()) -> file:filename_all().
 topic_dir(Topic, Partition) ->
     {ok, [LogDir | _]} = application:get_env(vonnegut, log_dirs),
     filename:join(LogDir, [binary_to_list(Topic), "-", integer_to_list(Partition)]).
 
+-spec topics_on_disk() -> [{vg:topic(), [vg:partition()]}].
 topics_on_disk() ->
     {ok, [DataDir| _]} = application:get_env(vonnegut, log_dirs),
     TopicPartitions = filelib:wildcard(filename:join(DataDir, "*")),
@@ -48,6 +56,7 @@ topics_on_disk() ->
     dict:to_list(TPDict).
 
 
+-spec open_append(file:filename_all()) -> {ok, file:io_device()} | {error, file:posix() | badarg | system_limit}.
 open_append(Filename) ->
     case application:get_env(vonnegut, delayed_write) of
         {ok, true} ->
@@ -59,14 +68,17 @@ open_append(Filename) ->
             file:open(Filename, [append, raw, binary])
     end.
 
+-spec open_read(file:filename_all()) -> {ok, file:io_device()} | {error, file:posix() | badarg | system_limit}.
 open_read(Filename) ->
     file:open(Filename, [read, raw, binary]).
 
+-spec to_integer(integer() | string() | binary()) -> integer().
 to_integer(I) when is_integer(I) -> I;
 to_integer(I) when is_list(I)    -> list_to_integer(I);
 to_integer(I) when is_binary(I)  -> binary_to_integer(I);
 to_integer(_)                    -> throw(badarg).
 
+-spec to_atom(atom() | string() | binary()) -> atom().
 to_atom(A) when is_list(A)   -> list_to_atom(A);
 to_atom(A) when is_binary(A) -> binary_to_atom(A, utf8);
 to_atom(A) when is_atom(A)   -> A;

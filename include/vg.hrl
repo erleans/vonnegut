@@ -53,11 +53,11 @@
 
 -record(chain, {
           name  :: binary() | atom(),
-          nodes :: [atom()] | undefined,
+          nodes = [] :: [atom()],
           topics_start :: binary() | start_space | undefined, % undef required because there's no way
           topics_end :: binary() | end_space | undefined,     % to encode these in metadata :\
-          head  :: {inet:ip_address() | inet:hostname(), inet:port_number()},
-          tail  :: {inet:ip_address() | inet:hostname(), inet:port_number()}
+          head  :: {string(), inet:port_number()},
+          tail  :: {string(), inet:port_number()}
          }).
 -type chain() :: #chain{}.
 

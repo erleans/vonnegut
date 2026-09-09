@@ -1,13 +1,24 @@
 vonnegut
 =====
 
-[![CircleCI](https://circleci.com/gh/SpaceTime-IoT/vonnegut.svg?style=svg)](https://circleci.com/gh/SpaceTime-IoT/vonnegut)
+[![CI](https://github.com/erleans/vonnegut/actions/workflows/ci.yml/badge.svg)](https://github.com/erleans/vonnegut/actions/workflows/ci.yml)
 
-[![codecov](https://codecov.io/gh/SpaceTime-IoT/vonnegut/branch/master/graph/badge.svg)](https://codecov.io/gh/SpaceTime-IoT/vonnegut)
+[![codecov](https://codecov.io/gh/erleans/vonnegut/branch/master/graph/badge.svg)](https://codecov.io/gh/erleans/vonnegut)
 
 Vonnegut is a append-only log that follows the file format and API of Kafka 1.0. The server can be run standalone, with 1 or more chains each with 1 or more replicas, or as part of another Erlang release which can talk to it directly.
 
 Each chain is responsible for a range of the topic space. A read or write to a topic requires finding what chain the topic belongs to and then making a request to the head, in the case of a write, or the tail, in the case of a read.
+
+Building
+-----
+
+Use Erlang/OTP 29 and rebar3 3.27.0 (versions are pinned in `.tool-versions`).
+Native test dependencies require a C/C++ compiler, CMake, and make.
+
+```shell
+$ rebar3 compile
+$ rebar3 as prod tar
+```
 
 Configuration
 -----
@@ -90,8 +101,34 @@ The tests require opening thousands of files and so may require increasing the l
 $ ulimit -n 63536
 ```
 
-Tests also require a nodename:
+Start the distribution port mapper before running the tests. The test runner
+uses the long node name `testrunner@127.0.0.1`; cluster tests start local nodes
+with OTP’s `peer` module:
 
 ```shell
-$ rebar3 ct
+$ epmd -daemon
+$ rebar3 do ct --name=testrunner@127.0.0.1, cover
+$ rebar3 covertool generate
 ```
+
+GitHub Actions runs compilation, xref, Dialyzer, ELP Eqwalizer, Common Test, and
+release packaging on OTP 29. Test logs and coverage reports are retained as
+workflow artifacts. Coverage is uploaded to Codecov using the repository’s
+`CODECOV_TOKEN` secret.
+
+Application modules enforce specs for every function and types for every record
+field at compile time. Run both type checkers locally with:
+
+```shell
+$ rebar3 dialyzer
+$ elp eqwalize-all --as default --bail-on-error --stats
+```
+
+CI pins ELP to `2026-08-10` (the OTP 29 build). `.elp.toml` enables checking
+across the application. `eqwalizer_support` provides the checker’s library
+specifications; it is not started by the release.
+
+Application logging uses OTP’s `logger` API. Lager remains for Partisan and
+legacy test logging. OpenCensus and its Google reporter are no longer included.
+Optional Snappy and LZ4 decoding still requires the corresponding codec modules
+to be supplied by the embedding release.

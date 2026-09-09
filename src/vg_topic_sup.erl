@@ -5,6 +5,8 @@
 
 -module(vg_topic_sup).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -behaviour(supervisor).
 
 %% API
@@ -19,6 +21,7 @@
 %% API functions
 %%====================================================================
 
+-spec start_link(vg:topic(), [vg:partition()]) -> supervisor:startlink_ret().
 start_link(Topic, Partitions) ->
     supervisor:start_link(?MODULE, [Topic, Partitions]).
 
@@ -27,7 +30,8 @@ start_link(Topic, Partitions) ->
 %%====================================================================
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
-init([Topic, Partitions]) ->
+-spec init([vg:topic() | [vg:partition()]]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
+init([Topic, Partitions]) when is_binary(Topic), is_list(Partitions) ->
     ChildSpecs = lists:flatten([child_specs(Topic, Partition) || Partition <- Partitions]),
     {ok, {{one_for_one, 0, 1}, ChildSpecs}}.
 
@@ -35,6 +39,7 @@ init([Topic, Partitions]) ->
 %% Internal functions
 %%====================================================================
 
+-spec child_specs(vg:topic(), vg:partition()) -> [supervisor:child_spec()].
 child_specs(Topic, Partition) ->
     %% wait for the chain to be active?
     Next = vg_chain_state:next(),

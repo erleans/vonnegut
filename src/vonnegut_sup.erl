@@ -5,6 +5,8 @@
 
 -module(vonnegut_sup).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -behaviour(supervisor).
 
 %% API
@@ -21,9 +23,11 @@
 %% API functions
 %%====================================================================
 
+-spec start_link() -> supervisor:startlink_ret().
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
+-spec start_cluster_mgr(vg_chain_state:chain_name(), [vg_chain_state:chain_node()]) -> supervisor:startchild_ret().
 start_cluster_mgr(Name, Nodes) ->
     {ok, [LogDir]} = application:get_env(vonnegut, log_dirs),
     ChildSpec = #{id      => vg_cluster_mgr,
@@ -32,6 +36,7 @@ start_cluster_mgr(Name, Nodes) ->
                   type    => supervisor},
     supervisor:start_child(?SERVER, ChildSpec).
 
+-spec start_acceptor_pool(vg_chain_state:role()) -> supervisor:startchild_ret().
 start_acceptor_pool(Role) ->
     ChildSpec = #{id      => vg_pool_sup,
                   start   => {vg_pool_sup, start_link, [Role]},
@@ -44,6 +49,7 @@ start_acceptor_pool(Role) ->
 %%====================================================================
 
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
+-spec init([]) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
     Port = application:get_env(vonnegut, http_port, 8000),
     ElliChild = {vonnegut_http, {elli, start_link, [[{callback, elli_middleware},

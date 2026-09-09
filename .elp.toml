@@ -1,0 +1,5 @@
+[eqwalizer]
+enable_all = true
+
+[rebar]
+profile = "default"

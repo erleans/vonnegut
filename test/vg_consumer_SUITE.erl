@@ -21,7 +21,7 @@ init_per_suite(Config) ->
     application:set_env(vonnegut, chain, [{discovery, local}]),
     application:start(shackle),
     application:ensure_all_started(vonnegut),
-    crypto:start(),
+    application:ensure_all_started(crypto),
     Config.
 
 end_per_suite(Config) ->

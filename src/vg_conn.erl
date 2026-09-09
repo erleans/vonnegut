@@ -1,5 +1,7 @@
 -module(vg_conn).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -behaviour(acceptor).
 -behaviour(gen_server).
 
@@ -21,26 +23,29 @@
 -include("vg.hrl").
 
 -type topic_partition() :: {binary(), [partition()]}.
--type partition() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
--type limited_partition() :: {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}.
+-type partition() :: {vg:partition(), integer(), non_neg_integer()}.
+-type limited_partition() :: {vg:partition(), integer(), non_neg_integer(), integer()}.
 
--record(state, {socket :: inets:socket(),
-                role   :: head | tail | undefined, %% middle disconnects
+-record(state, {socket :: inet:socket(),
+                role   :: vg_chain_state:role(), %% middle disconnects
                 ref    :: reference(),
                 buffer :: binary()}).
 
+-spec acceptor_init(term(), port(), [vg_chain_state:role()]) -> {ok, {reference(), vg_chain_state:role()}}.
 acceptor_init(_SockName, LSocket, [Role]) ->
     MRef = monitor(port, LSocket),
     {ok, {MRef, Role}}.
 
+-spec acceptor_continue(term(), inet:socket(), {reference(), vg_chain_state:role()}) -> no_return().
 acceptor_continue(_PeerName, Socket, {MRef, Role}) ->
-    lager:debug("new connection on ~p", [Socket]),
+    logger:debug("new connection on ~p", [Socket]),
     prometheus_gauge:inc(open_connections),
-    lager:debug("at=new_connection node=~p peer=~p role=~p",
+    logger:debug("at=new_connection node=~p peer=~p role=~p",
                 [node(), _PeerName, Role]),
     gen_server:enter_loop(?MODULE, [], #state{socket = Socket, ref = MRef,
                                               role = Role, buffer = <<>>}).
 
+-spec acceptor_terminate(term(), term()) -> no_return().
 acceptor_terminate(Reason, _) ->
     % Something went wrong. Either the acceptor_pool is terminating or the
     % accept failed.
@@ -49,21 +54,25 @@ acceptor_terminate(Reason, _) ->
 
 %% gen_server api
 
+-spec init(term()) -> {stop, acceptor}.
 init(_) ->
     {stop, acceptor}.
 
+-spec handle_call(term(), gen_server:from(), #state{}) -> {stop, term(), #state{}}.
 handle_call(Req, _, State) ->
     {stop, {bad_call, Req}, State}.
 
+-spec handle_cast(term(), #state{}) -> {stop, term(), #state{}}.
 handle_cast(Req, State) ->
     {stop, {bad_cast, Req}, State}.
 
+-spec handle_info(term(), #state{}) -> {stop, term(), #state{}} | {noreply, #state{}}.
 handle_info({tcp, _Socket, _Data}, State=#state{role=undefined}) ->
-    lager:info("request received while role undefined"),
+    logger:info("request received while role undefined"),
     {stop, undefined_role, State};
 handle_info({tcp, Socket, Data}, State=#state{socket=Socket,
                                               role=Role,
-                                              buffer=Buffer}) ->
+                                              buffer=Buffer}) when is_binary(Data) ->
     case handle_data(<<Buffer/binary, Data/binary>>, Role, Socket) of
         {ok, NewBuffer} ->
             ok = inet:setopts(Socket, [{active, once}]),
@@ -79,14 +88,16 @@ handle_info({'DOWN', MRef, port, _, _}, State=#state{socket=Socket,
                                                      ref=MRef}) ->
     %% Listen socket closed, receive all pending data then stop. In more
     %% advanced protocols will likely be able to do better.
-    lager:info("Gracefully closing ~p~n", [Socket]),
+    logger:info("Gracefully closing ~p~n", [Socket]),
     {stop, flush_socket(Socket), State};
 handle_info(_, State) ->
     {noreply, State}.
 
+-spec code_change(term(), #state{}, term()) -> {ok, #state{}}.
 code_change(_, State, _) ->
     {ok, State}.
 
+-spec terminate(term(), #state{}) -> ok.
 terminate(_, _) ->
     ok.
 
@@ -94,8 +105,7 @@ terminate(_, _) ->
 
 %% If a record can be fully read from the data then handle the request
 %% else return the data to be kept in the buffer
--spec handle_data(binary(), head | solo | tail, inets:socket()) ->
-                         {ok, binary()} | {error, any()}.
+-spec handle_data(binary(), vg_chain_state:role(), inet:socket()) -> {ok, binary()} | {error, term()}.
 handle_data(<<Size:32/signed-integer, Message:Size/binary, Rest/binary>>,
             Role, Socket) ->
     case handle_request(Message, Role, Socket) of
@@ -108,19 +118,21 @@ handle_data(Data, _Role, _Socket) ->
     {ok, Data}.
 
 %% Parse out the type of request (apikey) and the request data
+-spec handle_request(binary(), vg_chain_state:role(), inet:socket()) -> ok | {error, term()}.
 handle_request(<<ApiKey:16/signed-integer, _ApiVersion:16/signed-integer, CorrelationId:32/signed-integer,
                  ClientIdSize:16/signed-integer, _ClientId:ClientIdSize/binary, Request/binary>>,
                Role, Socket) ->
     prometheus_counter:inc(client_requests),
     handle_request(ApiKey, Role, Request, CorrelationId, Socket).
 
+-spec handle_request(integer(), vg_chain_state:role(), binary(), integer(), inet:socket()) -> ok | {error, term()}.
 handle_request(?METADATA_REQUEST, _, Data, CorrelationId, Socket) ->
     Topics0 = vg_protocol:decode_metadata_request(Data),
     Topics = case Topics0 of
                  [] -> vg_topics:all();
                  _ -> Topics0
              end,
-    lager:info("at=metadata_request topics=~p", [Topics]),
+    logger:info("at=metadata_request topics=~p", [Topics]),
     %% need to return all nodes and start giving nodes an integer id
     {_, Chains, _} = vg_cluster_mgr:get_map(),
     {_, Nodes} = maps:fold(fun(_Name, #chain{head={HeadHost, HeadPort},
@@ -157,7 +169,7 @@ handle_request(?ENSURE_REQUEST, _, Data, CorrelationId, Socket) ->
                  [] -> vg_topics:all();
                  _ -> [vg:ensure_topic(T) || T <- Topics0], Topics0
              end,
-    lager:info("at=metadata_request topics=~p", [Topics]),
+    logger:info("at=metadata_request topics=~p", [Topics]),
     %% need to return all nodes and start giving nodes an integer id
     {_, Chains, _} = vg_cluster_mgr:get_map(),
     {_, Nodes} = maps:fold(fun(_Name, #chain{head={HeadHost, HeadPort},
@@ -216,7 +228,7 @@ handle_request(?FETCH_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/signe
                                      _MinBytes:32/signed, Rest/binary>>,
                CorrelationId, Socket) ->
     {[{Topic, [{Partition, _Offset, _MaxBytes} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic/1, Rest),
-    lager:info("at=fetch_request error=request_disallowed topic=~s partition=~p", [Topic, Partition]),
+    logger:info("at=fetch_request error=request_disallowed topic=~s partition=~p", [Topic, Partition]),
     Response = vg_protocol:encode_array([[vg_protocol:encode_string(Topic),
                                           vg_protocol:encode_array([vg_protocol:encode_fetch_topic_response(Partition,
                                                                                                             ?FETCH_DISALLOWED_ERROR,
@@ -229,7 +241,7 @@ handle_request(?FETCH2_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/sign
                                       _MinBytes:32/signed, Rest/binary>>,
                CorrelationId, Socket) ->
     {[{Topic, [{Partition, _Offset, _MaxBytes, _Limit} | _]} | _], _} = vg_protocol:decode_array(fun decode_topic2/1, Rest),
-    lager:info("at=fetch2_request error=request_disallowed topic=~s partition=~p", [Topic, Partition]),
+    logger:info("at=fetch2_request error=request_disallowed topic=~s partition=~p", [Topic, Partition]),
     Response = vg_protocol:encode_array([[vg_protocol:encode_string(Topic),
                                           vg_protocol:encode_array([vg_protocol:encode_fetch_topic_response(Partition,
                                                                                                             ?FETCH_DISALLOWED_ERROR,
@@ -239,7 +251,7 @@ handle_request(?FETCH2_REQUEST, _ , <<_ReplicaId:32/signed, _MaxWaitTime:32/sign
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, Response]),
     {error, request_disallowed};
 handle_request(?REPLICATE_REQUEST, Role, _Data, CorrelationId, Socket) when Role =:= head orelse Role =:= solo ->
-    lager:info("at=replicate_request error=replicate_disallowed", []),
+    logger:info("at=replicate_request error=replicate_disallowed", []),
     ReplicateResponse = vg_protocol:encode_replicate_response({0, ?REPLICATE_DISALLOWED_ERROR, -1}),
     Size = erlang:iolist_size(ReplicateResponse) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ReplicateResponse]),
@@ -265,30 +277,30 @@ handle_request(?REPLICATE_REQUEST, _Role, Data, CorrelationId, Socket) ->
     gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, ReplicateResponse]);
 handle_request(?DELETE_TOPIC_REQUEST, _Role, Data, CorrelationId, Socket) ->
     {Topic, <<>>} = vg_protocol:decode_string(Data),
-    lager:info("received request to delete topic ~p", [Topic]),
+    logger:info("received request to delete topic ~p", [Topic]),
     try vg:delete_topic(Topic) of
         ok ->
             ok;
         {error, Reason} ->
-            lager:info("at=delete_topic error=~p", [Reason])
+            logger:info("at=delete_topic error=~p", [Reason])
     catch
         _:R ->
-            lager:info("at=delete_topic error=~p", [R])
+            logger:info("at=delete_topic error=~p", [R])
     end,
     Response = vg_protocol:encode_string(<<"OK">>),
     Size = erlang:iolist_size(Response) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed-integer, CorrelationId:32/signed-integer>>, Response]);
 handle_request(?REPLICATE_DELETE_TOPIC_REQUEST, _Role, Data, CorrelationId, Socket) ->
     {Topic, <<>>} = vg_protocol:decode_string(Data),
-    lager:info("received replicated request to delete topic ~p", [Topic]),
+    logger:info("received replicated request to delete topic ~p", [Topic]),
     try vg_topic_mgr:delete_topic(Topic, 0) of
         ok ->
             ok;
         {error, Reason} ->
-            lager:info("at=delete_topic error=~p", [Reason])
+            logger:info("at=delete_topic error=~p", [Reason])
     catch
         _:R ->
-            lager:info("at=delete_topic error=~p", [R])
+            logger:info("at=delete_topic error=~p", [R])
     end,
     Response = vg_protocol:encode_string(<<"OK">>),
     Size = erlang:iolist_size(Response) + 4,
@@ -316,13 +328,13 @@ handle_request(?PRODUCE_REQUEST, _, Data, CorrelationId, Socket) ->
     Results = [{Topic, [{Partition, ?PRODUCE_DISALLOWED_ERROR, 0}
                         || {Partition, _MessageSet} <- PartitionData]}
               || {Topic, PartitionData} <- TopicData],
-    lager:info("at=produce_request error=request_disallowed", []),
+    logger:info("at=produce_request error=request_disallowed", []),
     ProduceResponse = vg_protocol:encode_produce_response(Results),
     Size = erlang:iolist_size(ProduceResponse) + 4,
     gen_tcp:send(Socket, [<<Size:32/signed, CorrelationId:32/signed>>, ProduceResponse]),
     {error, request_disallowed};
 handle_request(?TOPICS_REQUEST, _Role, Data, CorrelationId, Socket) ->
-    lager:info("at=topics_request"),
+    logger:info("at=topics_request"),
     {FilterTopics, <<>>} = vg_protocol:decode_array(fun vg_protocol:decode_string/1, Data),
     TopicsCount =
         case FilterTopics of
@@ -351,7 +363,7 @@ decode_topic(<<Size:16/signed-integer, Topic:Size/binary, PartitionsRaw/binary>>
 decode_partition(<<Partition:32/signed-integer, FetchOffset:64/signed-integer, MaxBytes:32/signed-integer, Rest/binary>>) ->
     {{Partition, FetchOffset, MaxBytes}, Rest}.
 
--spec decode_topic2(binary()) -> {topic_partition(), binary()}.
+-spec decode_topic2(binary()) -> {{vg:topic(), [limited_partition()]}, binary()}.
 decode_topic2(<<Size:16/signed-integer, Topic:Size/binary, PartitionsRaw/binary>>) ->
     {Partitions, Rest} = vg_protocol:decode_array(fun decode_partition2/1, PartitionsRaw),
     {{Topic, Partitions}, Rest}.
@@ -363,6 +375,7 @@ decode_partition2(<<Partition:32/signed-integer, FetchOffset:64/signed-integer,
 
 %%
 
+-spec fetch(vg:topic(), [partition() | limited_partition()]) -> {non_neg_integer(), [iodata() | vg:file_chunk()]}.
 fetch(Topic, Partitions) ->
     TopicResponseHeader = [vg_protocol:encode_string(Topic), <<(length(Partitions)):32/signed-integer>>],
     HeaderSize = 4 + 2 + size(Topic),
@@ -377,6 +390,7 @@ fetch(Topic, Partitions) ->
     {Size, [TopicResponseHeader | Response]}.
 
 %% a fetch response is a list of iolists and tuples representing file chunks to send through sendfile
+-spec do_send([iodata() | vg:file_chunk() | noop], inet:socket()) -> ok.
 do_send(FetchResults, Socket) ->
     lists:foreach(fun({_File, _Position, 0}) ->
                           %% have to noop here, as we're already framed,
@@ -390,6 +404,7 @@ do_send(FetchResults, Socket) ->
                        gen_tcp:send(Socket, IoList)
                   end, FetchResults).
 
+-spec sendfile(file:filename_all(), non_neg_integer(), non_neg_integer(), inet:socket()) -> {ok, non_neg_integer()}.
 sendfile(File, Position, Bytes, Socket) ->
     {ok, Fd} = file:open(File, [read, binary, raw]),
     try
@@ -399,6 +414,7 @@ sendfile(File, Position, Bytes, Socket) ->
         file:close(Fd)
     end.
 
+-spec flush_socket(inet:socket()) -> term().
 flush_socket(Socket) ->
     receive
         {tcp, Socket, Data}         -> flush_send(Socket, Data);
@@ -408,6 +424,7 @@ flush_socket(Socket) ->
         0                           -> normal
     end.
 
+-spec flush_send(inet:socket(), iodata()) -> term().
 flush_send(Socket, Data) ->
     case gen_tcp:send(Socket, Data) of
         ok              -> flush_recv(Socket);
@@ -415,9 +432,10 @@ flush_send(Socket, Data) ->
         {error, Reason} -> Reason
     end.
 
+-spec flush_recv(inet:socket()) -> term().
 flush_recv(Socket) ->
     case gen_tcp:recv(Socket, 0, 0) of
-        {ok, Data}       -> flush_send(Socket, Data);
+        {ok, Data} when is_binary(Data) -> flush_send(Socket, Data);
         {error, timeout} -> normal;
         {error, closed}  -> normal;
         {error, Reason}  -> Reason

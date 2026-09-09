@@ -25,7 +25,7 @@ init_per_suite(Config) ->
              Name = test_node(integer_to_list(N0)),
              Args = make_args(false, N0),
              IArgs = make_args(true, N0),
-             {ok, HostNode} = ct_slave:start(Name, Args),
+             {ok, HostNode} = start_node(Name, Args),
              {HostNode, {Name, {Args, IArgs}}}
          end
          || N0 <- lists:seq(0, ?NUM_NODES - 1)],
@@ -42,9 +42,9 @@ init_per_suite(Config) ->
 make_args(Inverse, N0) ->
     N = integer_to_list(N0),
 
-    ErlFlags = "-config ../../../../cluster/sys.config",
+    ErlArgs = ["-config", filename:absname("../../../../cluster/sys.config")],
 
-    CodePath = code:get_path(),
+    CodePath = [filename:absname(Path) || Path <- code:get_path(), filelib:is_dir(Path)],
 
     Chain = case Inverse of
                 true ->
@@ -52,19 +52,13 @@ make_args(Inverse, N0) ->
                 false ->
                     inverse_chain(5590 - N0)
             end,
-    [{kill_if_fail, true},
-     {monitor_master, true},
-     {init_timeout, 3000},
-     {startup_timeout, 3000},
-     {startup_functions,
+    {ErlArgs,
       [{code, set_path, [CodePath]},
-       {application, load, [lager]},
-       {application, set_env,
-        [lager, handlers,
-         [{lager_console_backend, [{level, debug}]},
-          {lager_file_backend,
-           [{file, "log/console"++N++".log"}, {level, debug}]}]]},
-       {application, ensure_all_started, [lager]},
+       %% {application, set_env,
+       %%  [lager, handlers,
+       %%   [{lager_console_backend, [{level, debug}]},
+       %%    {lager_file_backend,
+       %%     [{file, "log/console"++N++".log"}, {level, debug}]}]]},
        {application, load, [partisan]},
        {application, set_env, [partisan, peer_ip, {127,0,0,1}]},
        {application, set_env, [partisan, peer_port, 15555+N0]},
@@ -75,9 +69,37 @@ make_args(Inverse, N0) ->
        {application, set_env, [vonnegut, http_port, 8000+N0]},
        {application, set_env,
         [vonnegut, log_dirs, ["data/node" ++ N ++ "/"]]},
-       {application, ensure_all_started, [vonnegut]}]},
-     {erl_flags, ErlFlags}].
+       {application, ensure_all_started, [vonnegut]}]}.
 
+
+%% Keep controllers independent of Common Test's short-lived callback processes.
+%% The peer control connection still shuts down children when the runner exits.
+start_node(Node, {Args, StartupFunctions}) ->
+    [Name, Host] = string:split(atom_to_list(Node), "@"),
+    {ok, Peer, Node} = peer:start(#{name => Name,
+                                  host => Host,
+                                  longnames => true,
+                                  connection => standard_io,
+                                  args => Args,
+                                  wait_boot => 30000}),
+    try
+        true = register(Node, Peer),
+        [begin
+             Result = peer:call(Peer, M, F, A),
+             case Result of
+                 {error, Reason} -> error({node_startup_failed, Node, M, F, Reason});
+                 _ -> ok
+             end
+         end || {M, F, A} <- StartupFunctions],
+        {ok, Node}
+    catch Class:Error:Stacktrace ->
+        peer:stop(Peer),
+        erlang:raise(Class, Error, Stacktrace)
+    end.
+
+stop_node(Node) ->
+    ok = peer:stop(whereis(Node)),
+    {ok, Node}.
 
 wait_for_nodes(_Nodes, 0) ->
     error(too_slow);
@@ -113,10 +135,14 @@ inverse_chain(N) ->
 
 end_per_suite(Config) ->
     Nodes = ?config(nodes, Config),
+    %% OTP 29's cover server monitors registered peer nodes while collecting
+    %% results. Detach live peers before shutting them down so the later
+    %% rebar3 cover step does not try to monitor already-dead nodes.
+    ok = ct_cover:remove_nodes(Nodes),
     [begin
-         ct_slave:stop(Node)
+         stop_node(Node)
      end
-     || {_Pid, Node} <- Nodes],
+     || Node <- Nodes],
     application:stop(vonnegut),
     application:unload(vonnegut),
     net_kernel:stop(),
@@ -124,13 +150,13 @@ end_per_suite(Config) ->
     ok.
 
 connect(Node, _Wait, 0) ->
-    lager:error("could not connect to ~p, exiting", [Node]),
+    logger:error("could not connect to ~p, exiting", [Node]),
     exit(disterl);
 connect(Node, Wait, Tries) ->
     try
         pong = net_adm:ping(Node)
     catch _:_ ->
-            lager:debug("connect failed: ~p ~p", [Node, Tries]),
+            logger:debug("connect failed: ~p ~p", [Node, Tries]),
             timer:sleep(Wait),
             connect(Node, Wait, Tries - 1)
     end.
@@ -312,7 +338,7 @@ roles_w_reconnect(Config) ->
      || N <- lists:seq(1, 20)],
 
     [begin
-         ?assertMatch({ok, _}, ct_slave:stop(Node))
+         ?assertMatch({ok, _}, stop_node(Node))
      end
      || Node <- Nodes],
     ct:pal("nodes() ~p", [nodes()]),
@@ -322,7 +348,7 @@ roles_w_reconnect(Config) ->
     %% and reconnect modes.
     Nodes1 =
         [begin
-             {ok, Node} = ct_slave:start(Name, IArgs),
+             {ok, Node} = start_node(Name, IArgs),
              Node
          end
          || {Name, {_Args, IArgs}} <- Restarts],
@@ -410,11 +436,11 @@ restart(Config) ->
      {MiddleName, {MiddleArgs, _}},
      {TailName, {TailArgs, _}}] = Restarts,
 
-    {ok, _} = ct_slave:stop(Head),
+    {ok, _} = stop_node(Head),
     timer:sleep(1000),
     ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 49}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
     ?assertMatch({error, pool_timeout}, vg_client:produce(<<"bar4">>, <<"this should fail">>)),
-    {ok, HeadNode} = ct_slave:start(HeadName, HeadArgs),
+    {ok, HeadNode} = start_node(HeadName, HeadArgs),
     timer:sleep(100),
 
     _ = ct_cover:add_nodes([HeadNode]),
@@ -425,11 +451,11 @@ restart(Config) ->
     ok = wait_for_start(fun() -> vg_client:produce(<<"bar4">>, <<"this should work eventually">>) end),
     ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 50}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
 
-    {ok, _} = ct_slave:stop(Middle),
+    {ok, _} = stop_node(Middle),
     timer:sleep(1000),
     ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 50}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
     ?assertMatch({error, timeout}, vg_client:produce(<<"bar4">>, <<"this should fail too">>)),
-    {ok, MiddleNode} = ct_slave:start(MiddleName, MiddleArgs),
+    {ok, MiddleNode} = start_node(MiddleName, MiddleArgs),
     timer:sleep(100),
 
     _ = ct_cover:add_nodes([MiddleNode]),
@@ -437,11 +463,11 @@ restart(Config) ->
     ok = wait_for_start(fun() -> vg_client:produce(<<"bar4">>, <<"this should work eventually too">>) end),
     ?assertMatch({ok, #{<<"bar4">> := #{0 := #{high_water_mark := 51}}}}, vg_client:fetch(<<"bar4">>, 0, 1000)),
 
-    {ok, _} = ct_slave:stop(Tail),
+    {ok, _} = stop_node(Tail),
     timer:sleep(1000),
     ?assertMatch({error, pool_timeout}, vg_client:fetch(<<"bar4">>, 0, 1000)),
     ?assertMatch({error, timeout}, vg_client:produce(<<"bar4">>, <<"this should fail">>)),
-    {ok, TailNode} = ct_slave:start(TailName, TailArgs),
+    {ok, TailNode} = start_node(TailName, TailArgs),
     timer:sleep(100),
 
     _ = ct_cover:add_nodes([TailNode]),
@@ -745,14 +771,14 @@ restart_cluster(Config) ->
     Restarts = ?config(restart, Config),
     ct:pal("nodes() ~p", [nodes()]),
     [begin
-         ?assertMatch({ok, _}, ct_slave:stop(Node))
+         ?assertMatch({ok, _}, stop_node(Node))
      end
      || Node <- Nodes],
     ct:pal("nodes() ~p", [nodes()]),
     timer:sleep(1000),
     Nodes1 =
         [begin
-             {ok, Node} = ct_slave:start(Name, Args),
+             {ok, Node} = start_node(Name, Args),
              Node
          end
          || {Name, {Args, _}} <- Restarts],

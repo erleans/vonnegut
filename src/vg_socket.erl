@@ -1,5 +1,9 @@
 -module(vg_socket).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
+-type state() :: {inet:socket(), reference()}.
+
 -behaviour(gen_server).
 
 %% public api
@@ -17,20 +21,22 @@
 
 %% public api
 
+-spec start_link() -> gen_server:start_ret().
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %% gen_server api
 
+-spec init([]) -> {ok, state()} | {stop, inet:posix() | system_limit}.
 init([]) ->
     Port = vg_config:port(),
     AcceptorPoolSize = application:get_env(vonnegut, acceptor_pool_size, 10),
     %% Trapping exit so can close socket in terminate/2
     _ = process_flag(trap_exit, true),
-    Opts = [{active, once}, {reuseaddr, true}, {buffer, 65535},
+    Opts = [{inet_backend, inet}, {active, once}, {reuseaddr, true}, {buffer, 65535},
             {nodelay, true}, {mode, binary}, {packet, raw}],
     case gen_tcp:listen(Port, Opts) of
-        {ok, Socket} ->
+        {ok, Socket} when is_port(Socket) ->
             %% acceptor could close the socket if there is a problem
             MRef = monitor(port, Socket),
             vg_pool:accept_socket(Socket, AcceptorPoolSize),
@@ -39,20 +45,25 @@ init([]) ->
             {stop, Reason}
     end.
 
+-spec handle_call(term(), gen_server:from(), state()) -> {stop, term(), state()}.
 handle_call(Req, _, State) ->
     {stop, {bad_call, Req}, State}.
 
+-spec handle_cast(term(), state()) -> {stop, term(), state()}.
 handle_cast(Req, State) ->
     {stop, {bad_cast, Req}, State}.
 
+-spec handle_info(term(), state()) -> {stop, term(), state()} | {noreply, state()}.
 handle_info({'DOWN', MRef, port, Socket, Reason}, {Socket, MRef} = State) ->
     {stop, Reason, State};
 handle_info(_, State) ->
     {noreply, State}.
 
+-spec code_change(term(), state(), term()) -> {ok, state()}.
 code_change(_, State, _) ->
     {ok, State}.
 
+-spec terminate(term(), state()) -> ok.
 terminate(_, {Socket, MRef}) ->
     % Socket may already be down but need to ensure it is closed to avoid
     % eaddrinuse error on restart

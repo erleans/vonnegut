@@ -1,5 +1,7 @@
 -module(vg_config).
 
+-compile([warn_missing_spec_all, warn_untyped_record]).
+
 -export([chain_name/0,
          port/0,
          cluster_type/0,
@@ -7,9 +9,9 @@
 
 -define(DEFAULT_PORT, 5588).
 
--type cluster_type() :: local | {direct, [any()]} | {srv, string()} | none.
+-type cluster_type() :: local | {direct, [vg_chain_state:chain_node()]} | {srv, string()} | none.
 
--export_types([cluster_type/0]).
+-export_type([cluster_type/0]).
 
 -spec chain_name() -> vg_chain_state:chain_name().
 chain_name() ->
@@ -31,7 +33,7 @@ cluster_type() ->
         {srv, Domain} ->
             {srv, Domain};
         Other ->
-            lager:error("Unknown clustering option: ~p", [Other]),
+            logger:error("Unknown clustering option: ~p", [Other]),
             none
     end.
 
@@ -48,6 +50,8 @@ replicas() ->
 
 %% internal functions
 
+%% Application environment values are checked by the typed accessors above.
+-spec from_chain(atom(), term()) -> eqwalizer:dynamic().
 from_chain(Key, Default) ->
     case application:get_env(vonnegut, chain, []) of
         [] ->

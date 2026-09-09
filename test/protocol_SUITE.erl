@@ -36,7 +36,8 @@ groups() ->
 all() ->
     [
      incomplete_fetch_decode,
-     incomplete_produce_decode %,
+     incomplete_produce_decode,
+     forwarded_write_repair_preserves_offsets %,
      %% client_incomplete_handling
     ].
 
@@ -105,4 +106,24 @@ incomplete_produce_decode(_Config) ->
      end
      || N <- lists:seq(1, byte_size(ProduceResponse) - 1)],
 
+    ok.
+
+forwarded_write_repair_preserves_offsets(_Config) ->
+    #{record_batch := Batch, size := Size} =
+        vg_protocol:encode_record_batch([<<"a">>, <<"b">>]),
+    Offset = 42,
+    Framed = iolist_to_binary([<<Offset:64/signed-integer,
+                                 Size:32/signed-integer>>, Batch]),
+    FirstResponse =
+        iolist_to_binary(
+          vg_protocol:encode_replicate_response(
+            {0, ?WRITE_REPAIR, [{Offset, Framed}]})),
+    {0, #{records := Repair}} =
+        vg_protocol:decode_response(?REPLICATE_REQUEST, FirstResponse),
+    ForwardedResponse =
+        iolist_to_binary(
+          vg_protocol:encode_replicate_response(
+            {0, ?WRITE_REPAIR, Repair})),
+    ?assertEqual(FirstResponse, ForwardedResponse),
+    ?assertMatch([#{base_offset := 42}], Repair),
     ok.
